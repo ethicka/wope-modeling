@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { VIEWS, VIEW_LABELS } from './data/formula-params.js';
+import { DEFAULT_COMPARED } from './data/districts.js';
 import ProfilesView from './components/ProfilesView.jsx';
 import FormulaView from './components/FormulaView.jsx';
 import ResultsView from './components/ResultsView.jsx';
@@ -11,8 +12,12 @@ import CustomFormulaView from './components/CustomFormulaView.jsx';
 export default function SFRAModel() {
   const [view, setView] = useState("profiles");
   const [selected, setSelected] = useState("westOrange");
+  const [compared, setCompared] = useState(DEFAULT_COMPARED);
   const [overrides, setOverrides] = useState({});
   const [customParams, setCustomParams] = useState({});
+
+  const addCompared = (key) => setCompared(prev => prev.includes(key) ? prev : [...prev, key].slice(0, 8));
+  const removeCompared = (key) => setCompared(prev => prev.filter(k => k !== key));
 
   return (
     <div style={{
@@ -29,7 +34,7 @@ export default function SFRAModel() {
         <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}>
           <span style={{ fontSize: 11, color: "#c4b98a", fontWeight: 600, letterSpacing: "0.12em", textTransform: "uppercase" }}>NJ SFRA</span>
           <span style={{ fontSize: 11, color: "#3a382f" }}>|</span>
-          <span style={{ fontSize: 11, color: "#5a5848" }}>School Funding Reform Act Interactive Model</span>
+          <span style={{ fontSize: 11, color: "#5a5848" }}>School Funding Reform Act Interactive Model — 558 Districts</span>
         </div>
         <h1 style={{ fontSize: 30, fontWeight: 700, fontFamily: "'Instrument Serif', serif", color: "#e2e0d6", margin: "4px 0 12px", letterSpacing: "-0.02em" }}>
           Education Funding Scenario Explorer
@@ -52,10 +57,10 @@ export default function SFRAModel() {
       <div style={{ padding: "24px 32px", maxWidth: 1100 }}>
         {view === "profiles" && <ProfilesView selected={selected} setSelected={setSelected} />}
         {view === "formula" && <FormulaView overrides={overrides} setOverrides={setOverrides} />}
-        {view === "custom" && <CustomFormulaView customParams={customParams} setCustomParams={setCustomParams} />}
-        {view === "budget" && <BudgetView overrides={overrides} />}
-        {view === "results" && <ResultsView overrides={overrides} />}
-        {view === "projection" && <ProjectionView overrides={overrides} />}
+        {view === "custom" && <CustomFormulaView compared={compared} addCompared={addCompared} removeCompared={removeCompared} customParams={customParams} setCustomParams={setCustomParams} />}
+        {view === "budget" && <BudgetView compared={compared} addCompared={addCompared} removeCompared={removeCompared} overrides={overrides} />}
+        {view === "results" && <ResultsView compared={compared} addCompared={addCompared} removeCompared={removeCompared} overrides={overrides} />}
+        {view === "projection" && <ProjectionView compared={compared} addCompared={addCompared} removeCompared={removeCompared} overrides={overrides} />}
         {view === "fiscal" && <FiscalView overrides={overrides} />}
       </div>
     </div>

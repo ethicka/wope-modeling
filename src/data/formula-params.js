@@ -10,7 +10,13 @@ export const FORMULA = {
   evMult: 0.014949314, incMult: 0.059963161,
 };
 
-export const GCA = { essex: 1.0237, camden: 0.9767, passaic: 0.9893 };
+export const GCA = {
+  atlantic: 0.9693, bergen: 1.0051, burlington: 0.9848, camden: 0.9767,
+  capemay: 0.9429, cumberland: 0.9530, essex: 1.0237, gloucester: 0.9703,
+  hudson: 1.0341, hunterdon: 1.0084, mercer: 1.0087, middlesex: 1.0046,
+  monmouth: 0.9953, morris: 1.0179, ocean: 0.9678, passaic: 0.9893,
+  salem: 0.9703, somerset: 1.0355, sussex: 0.9873, union: 1.0182, warren: 0.9660,
+};
 
 export const SCENARIOS = {
   current: { label: "Current SFRA (FY26)", desc: "S-2 with FY26 budget caps (-3%/+6%)", overrides: {} },

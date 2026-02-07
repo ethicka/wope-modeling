@@ -8,18 +8,22 @@ import { fmt, fmtPct, fmtNum } from '../utils/format.js';
 import Pill from './ui/Pill.jsx';
 import Tip from './ui/Tip.jsx';
 import StatCard from './ui/StatCard.jsx';
+import { ComparisonBar } from './ui/DistrictSearch.jsx';
 
-export default function CustomFormulaView({ customParams, setCustomParams }) {
+export default function CustomFormulaView({ compared, addCompared, removeCompared, customParams, setCustomParams }) {
   const p = { ...CUSTOM_DEFAULTS, ...customParams };
 
   const set = (k, v) => setCustomParams({ ...customParams, [k]: v });
 
-  const results = Object.entries(DISTRICTS).map(([k, d]) => {
+  const results = compared.map(k => {
+    const d = DISTRICTS[k];
+    if (!d) return null;
     const cd = CUSTOM_DATA[k];
+    if (!cd) return null;
     const custom = runCustomFormula(d, cd, p);
     const sfra = runFormula(d);
     return { key: k, ...d, cd, custom, sfra };
-  });
+  }).filter(Boolean);
 
   const compData = results.map(r => ({
     name: r.short, sfra: r.sfra.totalFormula / 1e6, custom: r.custom.totalCustom / 1e6, color: r.color,
@@ -39,6 +43,7 @@ export default function CustomFormulaView({ customParams, setCustomParams }) {
 
   return (
     <div>
+      <ComparisonBar compared={compared} districts={DISTRICTS} onRemove={removeCompared} onAdd={addCompared} />
       {/* Header explanation */}
       <div style={{ marginBottom: 20, padding: 16, background: "linear-gradient(135deg, #201428, #1a1914)", borderRadius: 12, border: "1px solid #3a2848" }}>
         <div style={{ fontSize: 14, color: "#c49aea", fontWeight: 600, marginBottom: 6 }}>🧪 Custom Aid Formula</div>
@@ -265,13 +270,13 @@ export default function CustomFormulaView({ customParams, setCustomParams }) {
           return (
             <div>
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-                <StatCard label="4-District SFRA Total" value={fmt(sfraTotal)} sub="current law" />
-                <StatCard label="4-District Custom Total" value={fmt(customTotal)} sub={`Δ ${fmt(sampleDelta)} (${fmtPct(pctChange)})`} color={sampleDelta > 0 ? "#d8b4fe" : "#f87171"} />
-                <StatCard label="Est. Statewide Impact" value={fmt(estDelta)} sub={<>Scaled to all {fmtNum(1318781)} students</>} color="#c4b98a" />
+                <StatCard label={`${results.length}-District SFRA Total`} value={fmt(sfraTotal)} sub="current law" />
+                <StatCard label={`${results.length}-District Custom Total`} value={fmt(customTotal)} sub={`Delta: ${fmt(sampleDelta)} (${fmtPct(pctChange)})`} color={sampleDelta > 0 ? "#d8b4fe" : "#f87171"} />
+                <StatCard label="Est. Statewide Impact" value={fmt(estDelta)} sub="scaled from comparison set" color="#c4b98a" />
                 <StatCard label="New Est. State Budget" value={fmt(statewide + estDelta)} sub={`from $12.1B baseline`} />
               </div>
               <div style={{ fontSize: 12, color: "#7a6898", lineHeight: 1.6 }}>
-                <strong style={{ color: "#a89aca" }}>Methodology:</strong> The 4-district sample (WO, CH, NK, PT) represents a cross-section of suburban and urban districts. The statewide estimate scales the sample delta by the ratio of statewide formula aid ($12.1B) to the 4-district SFRA baseline. This is a rough estimate — the actual impact depends on the full distribution of poverty rates, IDF, and TBI across all 600+ districts.
+                <strong style={{ color: "#a89aca" }}>Methodology:</strong> The comparison set represents a sample of districts. The statewide estimate scales the sample delta by the ratio of statewide formula aid ($12.1B) to the sample SFRA baseline. Add more districts to improve the estimate.
                 {pctChange > 5 && <span style={{ color: "#f59e0b", display: "block", marginTop: 6 }}>⚠ A {fmtPct(pctChange)} increase would require significant new state revenue or reallocation from other budget areas.</span>}
               </div>
             </div>
@@ -285,7 +290,7 @@ export default function CustomFormulaView({ customParams, setCustomParams }) {
         <div style={{ fontSize: 12, color: "#8a7898", lineHeight: 1.7 }}>
           <p>• <strong style={{ color: "#d8b4fe" }}>Poverty Exponent {'>'} 1</strong> makes the formula progressive: districts with 80% poverty get disproportionately more than those at 40%. At exponent 2.0, a district at 80% poverty receives 4× the weight of one at 40%.</p>
           <p>• <strong style={{ color: "#d8b4fe" }}>Income Diversity Factor</strong> rewards districts with heterogeneous income distributions, recognizing that income inequality within a district creates service delivery challenges absent in uniformly wealthy or uniformly poor communities.</p>
-          <p>• <strong style={{ color: "#d8b4fe" }}>Tax Burden Index</strong> accounts for effort: Paterson (TBI={CUSTOM_DATA.paterson.taxBurdenIndex.toFixed(2)}) taxes its residents harder relative to income than Cherry Hill (TBI={CUSTOM_DATA.cherryHill.taxBurdenIndex.toFixed(2)}). Weighting this rewards communities that are already stretching to fund schools.</p>
+          <p>• <strong style={{ color: "#d8b4fe" }}>Tax Burden Index</strong> accounts for effort: districts with higher tax burden relative to income (TBI {'>'} 1.0) receive more aid. Weighting this rewards communities that are already stretching to fund schools.</p>
           <p>• Unlike SFRA's Adequacy-minus-LFS approach, this formula doesn't subtract local capacity — it directly scales aid by need indicators. This means wealthy districts with high poverty (rare but possible) would still receive substantial aid.</p>
         </div>
       </div>
