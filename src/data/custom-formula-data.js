@@ -58,7 +58,6 @@ export const CUSTOM_DEFAULTS = {
   idfWeight: 1.0,
   tbiWeight: 1.0,
   useFreeLunchAsPoverty: true,
-  minAidPP: 500,
   spedAddon: true,
   securityAddon: true,
 };

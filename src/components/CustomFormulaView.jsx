@@ -1,8 +1,6 @@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, Cell } from "recharts";
 import { DISTRICTS } from '../data/districts.js';
-import { FORMULA } from '../data/formula-params.js';
 import { CUSTOM_DATA, CUSTOM_DEFAULTS } from '../data/custom-formula-data.js';
-import { runFormula } from '../engine/sfra-formula.js';
 import { runCustomFormula } from '../engine/custom-formula.js';
 import { fmt, fmtPct, fmtNum } from '../utils/format.js';
 import Pill from './ui/Pill.jsx';
@@ -21,16 +19,15 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
     const cd = CUSTOM_DATA[k];
     if (!cd) return null;
     const custom = runCustomFormula(d, cd, p);
-    const sfra = runFormula(d);
-    return { key: k, ...d, cd, custom, sfra };
+    return { key: k, ...d, cd, custom };
   }).filter(Boolean);
 
   const compData = results.map(r => ({
-    name: r.short, sfra: r.sfra.totalFormula / 1e6, custom: r.custom.totalCustom / 1e6, color: r.color,
+    name: r.short, sfra: r.custom.sfraUncapped / 1e6, custom: r.custom.totalCustom / 1e6, color: r.color,
   }));
 
   const ppData = results.map(r => ({
-    name: r.short, sfra: r.sfra.perPupil, custom: r.custom.perPupil, color: r.color,
+    name: r.short, sfra: r.custom.sfraUncapped / r.enr.total, custom: r.custom.perPupil, color: r.color,
   }));
 
   const sliderStyle = (isDiff) => ({
@@ -46,7 +43,7 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
       <ComparisonBar compared={compared} districts={DISTRICTS} onRemove={removeCompared} onAdd={addCompared} />
       {/* Header explanation */}
       <div style={{ marginBottom: 20, padding: 16, background: "linear-gradient(135deg, #201428, #1a1914)", borderRadius: 12, border: "1px solid #3a2848" }}>
-        <div style={{ fontSize: 14, color: "#c49aea", fontWeight: 600, marginBottom: 6 }}>🧪 Custom Aid Formula</div>
+        <div style={{ fontSize: 14, color: "#c49aea", fontWeight: 600, marginBottom: 6 }}>Custom Aid Formula</div>
         <div style={{ fontSize: 12, color: "#8a7898", lineHeight: 1.6 }}>
           Model an alternative need-based formula. Like SFRA, this subtracts Local Fair Share from a need-based adequacy budget:
         </div>
@@ -57,7 +54,7 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
           where Need = Base × (1 + Poverty{p.povertyExponent !== 1 ? <sup style={{fontSize:10}}>{p.povertyExponent.toFixed(1)}</sup> : ""} × IDF × TBI) × Enrollment
         </div>
         <div style={{ fontSize: 11, color: "#6a5878", marginTop: 6 }}>
-          + optional SpEd categorical + Security aid + Transportation. Compared side-by-side with current SFRA.
+          Categoricals (SpEd, Security, Transportation) use actual SFRA allocations. Compared against <strong>uncapped</strong> SFRA formula.
         </div>
       </div>
 
@@ -113,17 +110,6 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
           </div>
         </div>
 
-        {/* Min Aid PP */}
-        <div style={sliderStyle(p.minAidPP !== 500)}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-            <span style={labelStyle(p.minAidPP !== 500)}>Minimum Aid Per Pupil ($)</span>
-            <span style={valStyle(p.minAidPP !== 500)}>${p.minAidPP.toLocaleString()}</span>
-          </div>
-          <input type="range" min={0} max={5000} step={100} value={p.minAidPP}
-            onChange={e => set("minAidPP", +e.target.value)} style={{ width: "100%", accentColor: "#9333ea" }} />
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#5a4868" }}><span>$0</span><span>$5,000</span></div>
-        </div>
-
         {/* Poverty source toggle */}
         <div style={{ padding: 14, background: "#1a1914", borderRadius: 10, border: "1px solid #2a2820", display: "flex", flexDirection: "column", justifyContent: "center" }}>
           <div style={{ fontSize: 12, color: "#8a8778", marginBottom: 8 }}>Poverty Metric Source</div>
@@ -137,10 +123,10 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
       {/* Toggle add-ons */}
       <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
         <Pill active={p.spedAddon} onClick={() => set("spedAddon", !p.spedAddon)} color="#9333ea">
-          {p.spedAddon ? "✓" : "○"} + SpEd Categorical
+          {p.spedAddon ? "+" : "-"} SpEd Categorical (actual SFRA)
         </Pill>
         <Pill active={p.securityAddon} onClick={() => set("securityAddon", !p.securityAddon)} color="#9333ea">
-          {p.securityAddon ? "✓" : "○"} + Security Aid
+          {p.securityAddon ? "+" : "-"} Security Aid (actual SFRA)
         </Pill>
         <Pill active={false} onClick={() => setCustomParams({})} color="#6a5878">Reset All</Pill>
       </div>
@@ -166,27 +152,31 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
                 {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#d8b4fe", fontWeight: 600 }}>{r.custom.povertyFactor.toFixed(4)}</td>)}
               </tr>
               <tr style={{ borderBottom: "1px solid #1f1e18" }}>
-                <td style={{ padding: 8, color: "#8a8778" }}><Tip term="IDF">Income Diversity Factor</Tip> (raw)</td>
+                <td style={{ padding: 8, color: "#8a8778" }}><Tip term="IDF">Income Diversity Factor</Tip>{p.idfWeight !== 1.0 ? " (raw)" : ""}</td>
                 {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#e2e0d6" }}>{r.cd.incomeDiversityFactor.toFixed(2)}</td>)}
               </tr>
-              <tr style={{ borderBottom: "1px solid #1f1e18" }}>
-                <td style={{ padding: 8, color: "#8a8778" }}><Tip term="IDF">IDF</Tip> (weighted)</td>
-                {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#d8b4fe", fontWeight: 600 }}>{r.custom.idf.toFixed(3)}</td>)}
-              </tr>
+              {p.idfWeight !== 1.0 && (
+                <tr style={{ borderBottom: "1px solid #1f1e18" }}>
+                  <td style={{ padding: 8, color: "#8a8778" }}><Tip term="IDF">IDF</Tip> (weighted ×{p.idfWeight.toFixed(2)})</td>
+                  {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#d8b4fe", fontWeight: 600 }}>{r.custom.idf.toFixed(3)}</td>)}
+                </tr>
+              )}
               <tr style={{ borderBottom: "1px solid #1f1e18" }}>
                 <td style={{ padding: 8, color: "#8a8778" }}><Tip term="TBI">Tax Burden</Tip> % (levy/income)</td>
                 {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#e2e0d6" }}>{(r.cd.taxBurdenPct * 100).toFixed(2)}%</td>)}
               </tr>
               <tr style={{ borderBottom: "1px solid #1f1e18" }}>
-                <td style={{ padding: 8, color: "#8a8778" }}><Tip term="TBI">Tax Burden Index</Tip> (statewide avg = 1.0)</td>
-                {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#d8b4fe", fontWeight: 600 }}>{r.cd.taxBurdenIndex.toFixed(3)}</td>)}
+                <td style={{ padding: 8, color: "#8a8778" }}><Tip term="TBI">Tax Burden Index</Tip> (statewide avg = 1.0){p.tbiWeight !== 1.0 ? "" : ""}</td>
+                {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#e2e0d6" }}>{r.cd.taxBurdenIndex.toFixed(3)}</td>)}
               </tr>
-              <tr style={{ borderBottom: "1px solid #1f1e18" }}>
-                <td style={{ padding: 8, color: "#8a8778" }}>TBI (weighted)</td>
-                {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#d8b4fe", fontWeight: 600 }}>{r.custom.tbi.toFixed(3)}</td>)}
-              </tr>
+              {p.tbiWeight !== 1.0 && (
+                <tr style={{ borderBottom: "1px solid #1f1e18" }}>
+                  <td style={{ padding: 8, color: "#8a8778" }}>TBI (weighted ×{p.tbiWeight.toFixed(2)})</td>
+                  {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#d8b4fe", fontWeight: 600 }}>{r.custom.tbi.toFixed(3)}</td>)}
+                </tr>
+              )}
               <tr style={{ borderBottom: "1px solid #2a2820", background: "#1f1a28" }}>
-                <td style={{ padding: 8, color: "#c49aea", fontWeight: 600 }}>Need Multiplier (Pov x IDF x TBI)</td>
+                <td style={{ padding: 8, color: "#c49aea", fontWeight: 600 }}>Need Multiplier (Pov × IDF × TBI)</td>
                 {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#d8b4fe", fontWeight: 700, fontSize: 15 }}>
                   {r.custom.needMultiplier.toFixed(4)}
                 </td>)}
@@ -215,9 +205,9 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
             <div style={{ fontSize: 16, fontWeight: 700, color: r.color, fontFamily: "'Instrument Serif', serif" }}>{r.name}</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}>
               <div>
-                <div style={{ fontSize: 10, color: "#6a6758", textTransform: "uppercase" }}>SFRA FY26</div>
-                <div style={{ fontSize: 17, fontWeight: 700, color: "#8a8778", fontFamily: "'Instrument Serif', serif" }}>{fmt(r.sfra.totalFormula)}</div>
-                <div style={{ fontSize: 11, color: "#6a6758" }}>{fmt(r.sfra.perPupil)}/pupil</div>
+                <div style={{ fontSize: 10, color: "#6a6758", textTransform: "uppercase" }}>SFRA (uncapped)</div>
+                <div style={{ fontSize: 17, fontWeight: 700, color: "#8a8778", fontFamily: "'Instrument Serif', serif" }}>{fmt(r.custom.sfraUncapped)}</div>
+                <div style={{ fontSize: 11, color: "#6a6758" }}>{fmt(r.custom.sfraUncapped / r.enr.total)}/pupil</div>
               </div>
               <div>
                 <div style={{ fontSize: 10, color: "#9333ea", textTransform: "uppercase" }}>Custom</div>
@@ -228,8 +218,13 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
             <div style={{ marginTop: 8, padding: "4px 8px", borderRadius: 6, fontSize: 12, fontWeight: 600,
               background: r.custom.changeSfra > 0 ? "#1a2818" : "#2a1414",
               color: r.custom.changeSfra > 0 ? "#34d399" : "#f87171" }}>
-              Δ from SFRA: {r.custom.changeSfra >= 0 ? "+" : ""}{fmt(r.custom.changeSfra)} ({fmtPct(r.custom.changeSfraPct)})
+              vs uncapped SFRA: {r.custom.changeSfra >= 0 ? "+" : ""}{fmt(r.custom.changeSfra)} ({fmtPct(r.custom.changeSfraPct)})
             </div>
+            {Math.abs(r.custom.changeFy26) > 1000 && (
+              <div style={{ marginTop: 4, padding: "3px 8px", borderRadius: 6, fontSize: 11, color: "#6a6758" }}>
+                vs FY26 actual: {r.custom.changeFy26 >= 0 ? "+" : ""}{fmt(r.custom.changeFy26)}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -237,14 +232,14 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
       {/* Charts */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
         <div style={{ padding: 20, background: "#1a1914", borderRadius: 12, border: "1px solid #2a2820" }}>
-          <div style={{ fontSize: 13, color: "#6a6758", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>Total Aid: SFRA vs Custom ($M)</div>
+          <div style={{ fontSize: 13, color: "#6a6758", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>Total Aid: SFRA (uncapped) vs Custom ($M)</div>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={compData} margin={{ left: 0, right: 10 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2820" />
               <XAxis dataKey="name" tick={{ fill: "#8a8778", fontSize: 12 }} axisLine={false} />
               <YAxis tick={{ fill: "#6a6758", fontSize: 11 }} axisLine={false} tickLine={false} />
               <Tooltip contentStyle={{ background: "#1a1914", border: "1px solid #2a2820", borderRadius: 8, color: "#e2e0d6", fontSize: 13 }} formatter={(v) => `$${v.toFixed(1)}M`} />
-              <Bar dataKey="sfra" fill="#4a4838" radius={[3,3,0,0]} barSize={18} name="SFRA FY26" />
+              <Bar dataKey="sfra" fill="#4a4838" radius={[3,3,0,0]} barSize={18} name="SFRA (uncapped)" />
               <Bar dataKey="custom" radius={[3,3,0,0]} barSize={18} name="Custom Formula">
                 {compData.map((e, i) => <Cell key={i} fill={e.color} opacity={0.7} />)}
               </Bar>
@@ -254,14 +249,14 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
         </div>
 
         <div style={{ padding: 20, background: "#1a1914", borderRadius: 12, border: "1px solid #2a2820" }}>
-          <div style={{ fontSize: 13, color: "#6a6758", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>Per Pupil Aid: SFRA vs Custom ($)</div>
+          <div style={{ fontSize: 13, color: "#6a6758", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>Per Pupil Aid: SFRA (uncapped) vs Custom ($)</div>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={ppData} margin={{ left: 10, right: 10 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2820" />
               <XAxis dataKey="name" tick={{ fill: "#8a8778", fontSize: 12 }} axisLine={false} />
               <YAxis tick={{ fill: "#6a6758", fontSize: 11 }} axisLine={false} tickLine={false} />
               <Tooltip contentStyle={{ background: "#1a1914", border: "1px solid #2a2820", borderRadius: 8, color: "#e2e0d6", fontSize: 13 }} formatter={(v) => `$${v.toFixed(0)}`} />
-              <Bar dataKey="sfra" fill="#4a4838" radius={[3,3,0,0]} barSize={18} name="SFRA FY26" />
+              <Bar dataKey="sfra" fill="#4a4838" radius={[3,3,0,0]} barSize={18} name="SFRA (uncapped)" />
               <Bar dataKey="custom" radius={[3,3,0,0]} barSize={18} name="Custom Formula">
                 {ppData.map((e, i) => <Cell key={i} fill={e.color} opacity={0.7} />)}
               </Bar>
@@ -275,7 +270,7 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
       <div style={{ padding: 20, background: "#1a1420", borderRadius: 12, border: "1px solid #2a2040", marginTop: 16 }}>
         <div style={{ fontSize: 13, color: "#c49aea", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>Est. Statewide Fiscal Impact</div>
         {(() => {
-          const sfraTotal = results.reduce((s, r) => s + r.sfra.totalFormula, 0);
+          const sfraTotal = results.reduce((s, r) => s + r.custom.sfraUncapped, 0);
           const customTotal = results.reduce((s, r) => s + r.custom.totalCustom, 0);
           const sampleDelta = customTotal - sfraTotal;
           const statewide = 12100000000;
@@ -285,14 +280,14 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
           return (
             <div>
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-                <StatCard label={`${results.length}-District SFRA Total`} value={fmt(sfraTotal)} sub="current law" />
-                <StatCard label={`${results.length}-District Custom Total`} value={fmt(customTotal)} sub={`Delta: ${fmt(sampleDelta)} (${fmtPct(pctChange)})`} color={sampleDelta > 0 ? "#d8b4fe" : "#f87171"} />
+                <StatCard label={`${results.length}-District SFRA (uncapped)`} value={fmt(sfraTotal)} sub="formula without caps" />
+                <StatCard label={`${results.length}-District Custom`} value={fmt(customTotal)} sub={`Delta: ${fmt(sampleDelta)} (${fmtPct(pctChange)})`} color={sampleDelta > 0 ? "#d8b4fe" : "#f87171"} />
                 <StatCard label="Est. Statewide Impact" value={fmt(estDelta)} sub="scaled from comparison set" color="#c4b98a" />
                 <StatCard label="New Est. State Budget" value={fmt(statewide + estDelta)} sub={`from $12.1B baseline`} />
               </div>
               <div style={{ fontSize: 12, color: "#7a6898", lineHeight: 1.6 }}>
-                <strong style={{ color: "#a89aca" }}>Methodology:</strong> The comparison set represents a sample of districts. The statewide estimate scales the sample delta by the ratio of statewide formula aid ($12.1B) to the sample SFRA baseline. Add more districts to improve the estimate.
-                {pctChange > 5 && <span style={{ color: "#f59e0b", display: "block", marginTop: 6 }}>⚠ A {fmtPct(pctChange)} increase would require significant new state revenue or reallocation from other budget areas.</span>}
+                <strong style={{ color: "#a89aca" }}>Methodology:</strong> Both the custom formula and SFRA baseline are <em>uncapped</em> formula outputs (no growth caps). The statewide estimate scales the sample delta by the ratio of statewide aid ($12.1B) to the sample SFRA baseline. Add more districts to improve the estimate.
+                {pctChange > 5 && <span style={{ color: "#f59e0b", display: "block", marginTop: 6 }}>A {fmtPct(pctChange)} increase would require significant new state revenue or reallocation from other budget areas.</span>}
               </div>
             </div>
           );
@@ -306,7 +301,9 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
           <p>• <strong style={{ color: "#d8b4fe" }}>Poverty Exponent {'>'} 1</strong> makes the formula progressive: districts with 80% poverty get disproportionately more than those at 40%. At exponent 2.0, a district at 80% poverty receives 4× the weight of one at 40%.</p>
           <p>• <strong style={{ color: "#d8b4fe" }}>Income Diversity Factor</strong> rewards districts with heterogeneous income distributions, recognizing that income inequality within a district creates service delivery challenges absent in uniformly wealthy or uniformly poor communities.</p>
           <p>• <strong style={{ color: "#d8b4fe" }}>Tax Burden Index</strong> accounts for effort: districts with higher tax burden relative to income (TBI {'>'} 1.0) receive more aid. Weighting this rewards communities that are already stretching to fund schools.</p>
-          <p>• Like SFRA, this formula subtracts <strong style={{ color: "#d8b4fe" }}>Local Fair Share</strong> from the need-based adequacy budget. Wealthy districts with high EV and income get little or no core aid because their LFS exceeds their need. The key difference from SFRA is how "need" is computed: SFRA uses grade-weighted enrollment + at-risk/LEP add-ons, while this formula uses a compound poverty/diversity/effort multiplier.</p>
+          <p>• Like SFRA, this formula subtracts <strong style={{ color: "#d8b4fe" }}>Local Fair Share</strong> from the need-based adequacy budget. Wealthy districts with high EV and income get little or no core aid because their LFS exceeds their need.</p>
+          <p>• <strong style={{ color: "#d8b4fe" }}>Categoricals</strong> (SpEd, Security, Transportation) use actual SFRA-allocated amounts — these are state-set pass-throughs not affected by the custom formula. Toggle them to see the impact of removing categoricals.</p>
+          <p>• Comparison is against <strong style={{ color: "#d8b4fe" }}>uncapped SFRA</strong> — what the formula says each district should get, without growth caps. This is an apples-to-apples comparison since the custom formula also has no caps.</p>
         </div>
       </div>
     </div>

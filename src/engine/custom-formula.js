@@ -1,6 +1,6 @@
 import { FORMULA } from '../data/formula-params.js';
 import { CUSTOM_DEFAULTS } from '../data/custom-formula-data.js';
-import { calcSecurityAtRiskPP } from './sfra-formula.js';
+import { runFormula } from './sfra-formula.js';
 
 export function runCustomFormula(d, cd, params = {}) {
   const p = { ...CUSTOM_DEFAULTS, ...params };
@@ -10,50 +10,54 @@ export function runCustomFormula(d, cd, params = {}) {
   // Choose poverty metric
   const povertyRate = p.useFreeLunchAsPoverty ? d.atRiskPct : cd.povertyRate;
 
-  // Build the compound multiplier
+  // Build the compound need multiplier
   const idf = 1.0 + (cd.incomeDiversityFactor - 1.0) * p.idfWeight;
   const tbi = 1.0 + (cd.taxBurdenIndex - 1.0) * p.tbiWeight;
   const povertyFactor = Math.pow(povertyRate, p.povertyExponent);
 
   // Core need: Base × (1 + PovertyFactor × IDF × TBI) × Enrollment
-  // This computes an "adequacy" budget — what the district needs — weighted by need factors.
-  // The poverty/IDF/TBI multipliers add to a base of 1.0, so every district gets at least
-  // base × enrollment, with high-need districts getting more.
+  // Every district gets at least base × enrollment, with high-need districts getting more.
   const needMultiplier = povertyFactor * idf * tbi;
   const coreNeed = base * (1.0 + needMultiplier) * enrollment;
 
   // Subtract Local Fair Share — same as SFRA: districts that can fund themselves get less aid.
-  // LFS = (avg3yrEV × evMult + aggregateIncome × incMult) / 2
   const avgEV = (d.ev3yr[0] + d.ev3yr[1] + d.ev3yr[2]) / 3;
-  const evMult = FORMULA.evMult;
-  const incMult = FORMULA.incMult;
-  let lfs = (avgEV * evMult + d.income * incMult) / 2;
+  const lfs = (avgEV * FORMULA.evMult + d.income * FORMULA.incMult) / 2;
 
   // Core equalization: need minus local capacity (floored at 0)
   const coreAid = Math.max(0, coreNeed - lfs);
 
-  // Add-ons (optional categorical)
-  let spedAdd = 0;
-  if (p.spedAddon) {
-    spedAdd = d.enr.total * FORMULA.spedRate * FORMULA.spedExcess * (1/3) * d.gca;
-  }
-  let secAdd = 0;
-  if (p.securityAddon) {
-    secAdd = FORMULA.secBase * d.enr.total + calcSecurityAtRiskPP(d.atRiskPct) * d.atRisk;
-  }
+  // Categoricals: use actual SFRA allocations (state-set pass-throughs, not part of custom formula)
+  const spedAid = p.spedAddon ? d.fy26Detail.sped : 0;
+  const secAid = p.securityAddon ? d.fy26Detail.sec : 0;
+  const transAid = d.fy26Detail.trans;
 
-  const totalCustom = Math.max(coreAid, p.minAidPP * enrollment) + spedAdd + secAdd + d.fy26Detail.trans;
+  const totalCustom = coreAid + spedAid + secAid + transAid;
   const perPupil = totalCustom / enrollment;
+
+  // Run uncapped SFRA for apples-to-apples comparison (both are formula outputs without caps)
+  const sfraNoCap = runFormula(d, { fullFunding: true });
+  const sfraUncapped = sfraNoCap.totalFormula;
+
+  // Also get capped SFRA for real-world context
+  const sfraCapped = runFormula(d);
 
   return {
     coreNeed, coreAid, lfs, needMultiplier,
-    spedAdd, secAdd, transAid: d.fy26Detail.trans,
+    spedAid, secAid, transAid,
     totalCustom, perPupil,
     povertyRate, idf, tbi, povertyFactor,
     aidPctBudget: totalCustom / d.budget * 100,
+    // Primary comparison: vs uncapped SFRA formula (apples-to-apples)
+    sfraUncapped,
+    changeSfra: totalCustom - sfraUncapped,
+    changeSfraPct: ((totalCustom - sfraUncapped) / sfraUncapped) * 100,
+    // Secondary: vs capped FY26 actual
+    sfraCapped: sfraCapped.totalFormula,
+    changeFy26: totalCustom - sfraCapped.totalFormula,
+    changeFy26Pct: ((totalCustom - sfraCapped.totalFormula) / sfraCapped.totalFormula) * 100,
+    // Vs prior year
     changeFy25: totalCustom - d.fy25,
-    changePct: ((totalCustom - d.fy25) / d.fy25) * 100,
-    changeSfra: totalCustom - d.fy26,
-    changeSfraPct: ((totalCustom - d.fy26) / d.fy26) * 100,
+    changeFy25Pct: ((totalCustom - d.fy25) / d.fy25) * 100,
   };
 }
