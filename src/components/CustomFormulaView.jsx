@@ -185,7 +185,10 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
             <tbody>
               <tr style={{ borderBottom: "1px solid #1f1e18" }}>
                 <td style={{ padding: 8, color: "#8a8778" }}>Poverty Rate ({p.useFreeLunchAsPoverty ? <Tip term="FRL">F/R Lunch</Tip> : "Census"})</td>
-                {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#e2e0d6", fontWeight: 600 }}>{(r.custom.povertyRate * 100).toFixed(1)}%</td>)}
+                {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#e2e0d6", fontWeight: 600 }}>
+                  {(r.custom.povertyRate * 100).toFixed(1)}%
+                  {r.custom.cepCorrected && <span style={{color:"#f59e0b",fontSize:10,display:"block"}}> CEP adj ({(r.atRiskPct*100).toFixed(0)}% reported)</span>}
+                </td>)}
               </tr>
               <tr style={{ borderBottom: "1px solid #1f1e18" }}>
                 <td style={{ padding: 8, color: "#8a8778" }}>Poverty Factor (rate<sup>{p.povertyExponent !== 1 ? p.povertyExponent.toFixed(1) : ""}</sup>)</td>
@@ -202,7 +205,7 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
                 </tr>
               )}
               <tr style={{ borderBottom: "1px solid #1f1e18" }}>
-                <td style={{ padding: 8, color: "#8a8778" }}><Tip term="TBI">Tax Burden Index</Tip> (capped 0.5-2.0)</td>
+                <td style={{ padding: 8, color: "#8a8778" }}><Tip term="TBI">Tax Burden Index</Tip> (floor 1.0, cap 2.0)</td>
                 {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#e2e0d6" }}>
                   {r.custom.tbi.toFixed(3)}{r.custom.tbiRaw !== r.custom.tbi ? <span style={{color:"#f59e0b",fontSize:10}}> cap</span> : ""}
                 </td>)}
@@ -289,58 +292,70 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
           {/* Summary stats */}
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
             <StatCard label="Total FY26 Actual" value={fmt(redist.totalFy26)} sub={`${redist.districtCount} districts`} />
-            <StatCard label="Total Custom" value={fmt(redist.totalCustom)} sub={`Net: ${fmt(redist.netChange)}`} color={Math.abs(redist.netChange) < 1e6 ? "#4ade80" : "#f59e0b"} />
-            <StatCard label="Gainers" value={redist.gainerCount} sub={`+${fmt(redist.totalGains)}`} color="#34d399" />
-            <StatCard label="Losers" value={redist.loserCount} sub={fmt(redist.totalLosses)} color="#f87171" />
+            <StatCard label="Total Custom" value={fmt(redist.totalCustom)} sub={`Net vs FY26: ${fmt(redist.netChange)}`} color={Math.abs(redist.netChange) < 1e6 ? "#4ade80" : "#f59e0b"} />
+            <StatCard label="Gain vs SFRA Formula" value={redist.gainerCount} sub={`+${fmt(redist.totalGains)}`} color="#34d399" />
+            <StatCard label="Lose vs SFRA Formula" value={redist.loserCount} sub={fmt(redist.totalLosses)} color="#f87171" />
           </div>
 
-          {/* Top gainers */}
+          <div style={{ fontSize: 11, color: "#f59e0b", marginBottom: 12, padding: "8px 12px", background: "#2a1f14", borderRadius: 8, lineHeight: 1.5 }}>
+            Comparison is <strong>vs uncapped SFRA formula</strong> (apples-to-apples). FY26 actual includes growth caps that give some districts far more than the formula says (e.g. Camden gets $236M above formula due to floor caps). "vs FY26" column shows the change from current actual spending.
+          </div>
+
+          {/* Top gainers/losers vs uncapped SFRA */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             <div>
-              <div style={{ fontSize: 12, color: "#34d399", fontWeight: 600, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.08em" }}>Top 10 Gainers</div>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <div style={{ fontSize: 12, color: "#34d399", fontWeight: 600, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.08em" }}>Top 10 Gainers (vs SFRA formula)</div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid #2a2820" }}>
-                    <th style={{ textAlign: "left", padding: 6, color: "#6a6758" }}>District</th>
-                    <th style={{ textAlign: "right", padding: 6, color: "#6a6758" }}>GCA</th>
-                    <th style={{ textAlign: "right", padding: 6, color: "#6a6758" }}>FRL%</th>
-                    <th style={{ textAlign: "right", padding: 6, color: "#6a6758" }}>Change</th>
-                    <th style={{ textAlign: "right", padding: 6, color: "#6a6758" }}>$/Pupil</th>
+                    <th style={{ textAlign: "left", padding: 5, color: "#6a6758" }}>District</th>
+                    <th style={{ textAlign: "right", padding: 5, color: "#6a6758" }}>FRL%</th>
+                    <th style={{ textAlign: "right", padding: 5, color: "#6a6758" }}>GCA</th>
+                    <th style={{ textAlign: "right", padding: 5, color: "#6a6758" }}>vs SFRA</th>
+                    <th style={{ textAlign: "right", padding: 5, color: "#6a6758" }}>vs FY26</th>
                   </tr>
                 </thead>
                 <tbody>
                   {redist.gainers.slice(0, 10).map(r => (
                     <tr key={r.key} style={{ borderBottom: "1px solid #1f1e18" }}>
-                      <td style={{ padding: 6, color: "#e2e0d6", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</td>
-                      <td style={{ textAlign: "right", padding: 6, color: "#4ade80" }}>{r.gca.toFixed(3)}</td>
-                      <td style={{ textAlign: "right", padding: 6, color: "#d8b4fe" }}>{(r.atRiskPct * 100).toFixed(0)}%</td>
-                      <td style={{ textAlign: "right", padding: 6, color: "#34d399", fontWeight: 600 }}>+{fmt(r.change)}</td>
-                      <td style={{ textAlign: "right", padding: 6, color: "#34d399" }}>+${Math.round(r.perPupilChange).toLocaleString()}</td>
+                      <td style={{ padding: 5, color: "#e2e0d6", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {r.name}{r.cepCorrected ? <span style={{color:"#f59e0b",fontSize:9}}> CEP</span> : ""}
+                      </td>
+                      <td style={{ textAlign: "right", padding: 5, color: "#d8b4fe" }}>{(r.atRiskPct * 100).toFixed(0)}%</td>
+                      <td style={{ textAlign: "right", padding: 5, color: "#4ade80" }}>{r.gca.toFixed(3)}</td>
+                      <td style={{ textAlign: "right", padding: 5, color: "#34d399", fontWeight: 600 }}>+{fmt(r.changeSfra)}</td>
+                      <td style={{ textAlign: "right", padding: 5, color: r.changeFy26 >= 0 ? "#8a8778" : "#f87171", fontSize: 10 }}>
+                        {r.changeFy26 >= 0 ? "+" : ""}{fmt(r.changeFy26)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
             <div>
-              <div style={{ fontSize: 12, color: "#f87171", fontWeight: 600, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.08em" }}>Top 10 Losers</div>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <div style={{ fontSize: 12, color: "#f87171", fontWeight: 600, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.08em" }}>Top 10 Losers (vs SFRA formula)</div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid #2a2820" }}>
-                    <th style={{ textAlign: "left", padding: 6, color: "#6a6758" }}>District</th>
-                    <th style={{ textAlign: "right", padding: 6, color: "#6a6758" }}>GCA</th>
-                    <th style={{ textAlign: "right", padding: 6, color: "#6a6758" }}>FRL%</th>
-                    <th style={{ textAlign: "right", padding: 6, color: "#6a6758" }}>Change</th>
-                    <th style={{ textAlign: "right", padding: 6, color: "#6a6758" }}>$/Pupil</th>
+                    <th style={{ textAlign: "left", padding: 5, color: "#6a6758" }}>District</th>
+                    <th style={{ textAlign: "right", padding: 5, color: "#6a6758" }}>FRL%</th>
+                    <th style={{ textAlign: "right", padding: 5, color: "#6a6758" }}>GCA</th>
+                    <th style={{ textAlign: "right", padding: 5, color: "#6a6758" }}>vs SFRA</th>
+                    <th style={{ textAlign: "right", padding: 5, color: "#6a6758" }}>vs FY26</th>
                   </tr>
                 </thead>
                 <tbody>
                   {redist.losers.slice(0, 10).map(r => (
                     <tr key={r.key} style={{ borderBottom: "1px solid #1f1e18" }}>
-                      <td style={{ padding: 6, color: "#e2e0d6", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</td>
-                      <td style={{ textAlign: "right", padding: 6, color: "#4ade80" }}>{r.gca.toFixed(3)}</td>
-                      <td style={{ textAlign: "right", padding: 6, color: "#d8b4fe" }}>{(r.atRiskPct * 100).toFixed(0)}%</td>
-                      <td style={{ textAlign: "right", padding: 6, color: "#f87171", fontWeight: 600 }}>{fmt(r.change)}</td>
-                      <td style={{ textAlign: "right", padding: 6, color: "#f87171" }}>${Math.round(r.perPupilChange).toLocaleString()}</td>
+                      <td style={{ padding: 5, color: "#e2e0d6", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {r.name}{r.cepCorrected ? <span style={{color:"#f59e0b",fontSize:9}}> CEP</span> : ""}
+                      </td>
+                      <td style={{ textAlign: "right", padding: 5, color: "#d8b4fe" }}>{(r.atRiskPct * 100).toFixed(0)}%</td>
+                      <td style={{ textAlign: "right", padding: 5, color: "#4ade80" }}>{r.gca.toFixed(3)}</td>
+                      <td style={{ textAlign: "right", padding: 5, color: "#f87171", fontWeight: 600 }}>{fmt(r.changeSfra)}</td>
+                      <td style={{ textAlign: "right", padding: 5, color: r.changeFy26 >= 0 ? "#8a8778" : "#f87171", fontSize: 10 }}>
+                        {r.changeFy26 >= 0 ? "+" : ""}{fmt(r.changeFy26)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -349,7 +364,7 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
           </div>
 
           <div style={{ fontSize: 11, color: "#8a7898", marginTop: 12, lineHeight: 1.6 }}>
-            Revenue-neutral redistributes the same ${fmt(redist.totalFy26)} total pot. GCA-weighted need means districts in higher-cost counties (Essex {(DISTRICTS.newark?.gca || 1.0237).toFixed(3)}, Hudson 1.034, Morris 1.018) get more per pupil than those in lower-cost areas (Cape May 0.943, Warren 0.966).
+            Revenue-neutral redistributes the same {fmt(redist.totalFy26)} total pot. GCA-weighted need means districts in higher-cost counties (Essex {(DISTRICTS.newark?.gca || 1.0237).toFixed(3)}, Hudson 1.034, Morris 1.018) get more per pupil than those in lower-cost areas (Cape May 0.943, Warren 0.966). TBI floor of 1.0 ensures poor districts aren't penalized for unreliable income data. DFG-A districts with CEP-suppressed FRL use a corrected 79% rate.
           </div>
         </div>
       )}
@@ -428,7 +443,8 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
           <p>• <strong style={{ color: "#4ade80" }}>Geographic Cost Adjustment (GCA)</strong> scales the need calculation by county-level cost-of-living. Essex County (1.024) costs ~10% more than Cape May (0.943). This means Newark needs more base funding per pupil than a district in a lower-cost area for the same purchasing power.</p>
           <p>• <strong style={{ color: "#d8b4fe" }}>Poverty Exponent {'>'} 1</strong> makes the formula progressive: districts with 80% poverty get disproportionately more than those at 40%. At exponent 2.0, a district at 80% poverty receives 4x the weight of one at 40%.</p>
           <p>• <strong style={{ color: "#d8b4fe" }}>Income Diversity Factor</strong> rewards districts with heterogeneous income distributions, recognizing that income inequality within a district creates service delivery challenges.</p>
-          <p>• <strong style={{ color: "#d8b4fe" }}>Tax Burden Index</strong> accounts for effort: districts taxing themselves more relative to income (TBI {'>'} 1.0) receive more aid. Capped at 0.5-2.0 due to income estimation data quality limitations.</p>
+          <p>• <strong style={{ color: "#d8b4fe" }}>Tax Burden Index</strong> accounts for effort: districts taxing themselves more relative to income (TBI {'>'} 1.0) receive more aid. Floor at 1.0 (never penalizes), cap at 2.0. TBI only rewards extra effort — districts with low or bad income data get neutral (1.0) treatment instead of being penalized.</p>
+          <p>• <strong style={{ color: "#f59e0b" }}>CEP Correction</strong>: DFG "A" districts with FRL below 60% (likely CEP — all students get free meals but individual counts aren't reported) use a corrected 79% rate based on DFG-A peers with valid data.</p>
           <p>• Like SFRA, this formula subtracts <strong style={{ color: "#d8b4fe" }}>Local Fair Share</strong> from the need-based adequacy budget. Wealthy districts with high EV and income get little or no core aid because their LFS exceeds their need.</p>
           <p>• <strong style={{ color: "#d8b4fe" }}>Categoricals</strong> (SpEd, Security, Transportation) use actual SFRA-allocated amounts — these are state-set pass-throughs not affected by the custom formula.</p>
           {revenueNeutral && <p>• <strong style={{ color: "#f59e0b" }}>Revenue-Neutral Mode</strong> auto-calibrates the base PP so total statewide aid equals total FY26 actual ({rnBase ? fmt(rnBase.targetTotal) : "~$11.4B"}). This redistributes existing dollars based on the formula's need weights + GCA, without increasing the overall budget.</p>}

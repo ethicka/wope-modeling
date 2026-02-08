@@ -3,9 +3,17 @@ import { CUSTOM_DEFAULTS, CUSTOM_DATA } from '../data/custom-formula-data.js';
 import { DISTRICTS } from '../data/districts.js';
 import { runFormula } from './sfra-formula.js';
 
-// Cap TBI to prevent bad income estimates from dominating
-const TBI_MIN = 0.5;
+// TBI bounds: minimum 1.0 so it only rewards effort, never penalizes.
+// Districts with TBI < 1.0 either have low effort (wealthy, already handled by LFS)
+// or unreliable income data (poor cities). Either way, penalizing hurts equity.
+const TBI_MIN = 1.0;
 const TBI_MAX = 2.0;
+
+// CEP (Community Eligibility Provision) correction: districts where all students
+// get free meals but individual FRL counts aren't reported, causing artificially
+// low atRiskPct. For DFG "A" districts with FRL below threshold, use DFG-A average.
+const CEP_FRL_THRESHOLD = 0.60; // DFG-A districts below this are likely CEP-affected
+const CEP_FRL_FLOOR = 0.79;     // Average FRL% for DFG-A districts with correct data
 
 /** Compute custom formula for a single district */
 export function runCustomFormula(d, cd, params = {}) {
@@ -13,8 +21,10 @@ export function runCustomFormula(d, cd, params = {}) {
   const base = p.customBase;
   const enrollment = d.enr.total;
 
-  // Choose poverty metric
-  const povertyRate = p.useFreeLunchAsPoverty ? d.atRiskPct : cd.povertyRate;
+  // Choose poverty metric, with CEP correction for DFG-A districts
+  let povertyRate = p.useFreeLunchAsPoverty ? d.atRiskPct : cd.povertyRate;
+  const cepCorrected = p.useFreeLunchAsPoverty && d.dfg === 'A' && d.atRiskPct < CEP_FRL_THRESHOLD;
+  if (cepCorrected) povertyRate = CEP_FRL_FLOOR;
 
   // Build the compound need multiplier (with TBI capped)
   const idf = 1.0 + (cd.incomeDiversityFactor - 1.0) * p.idfWeight;
@@ -52,7 +62,7 @@ export function runCustomFormula(d, cd, params = {}) {
     coreNeed, coreAid, lfs, needMultiplier, gca,
     spedAid, secAid, transAid,
     totalCustom, perPupil,
-    povertyRate, idf, tbi, tbiRaw, povertyFactor,
+    povertyRate, idf, tbi, tbiRaw, povertyFactor, cepCorrected,
     aidPctBudget: totalCustom / d.budget * 100,
     sfraUncapped,
     changeSfra: totalCustom - sfraUncapped,
@@ -97,12 +107,17 @@ export function calcStatewideRedistribution(params = {}) {
     if (!cd || !d.enr.total) continue;
     const r = runCustomFormula(d, cd, params);
     const fy26Actual = d.fy26Detail.eq + d.fy26Detail.sped + d.fy26Detail.sec + d.fy26Detail.trans;
-    const change = r.totalCustom - fy26Actual;
+    const changeFy26 = r.totalCustom - fy26Actual;
+    const changeSfra = r.totalCustom - r.sfraUncapped;
+    const floorCapBonus = fy26Actual - r.sfraUncapped; // how much FY26 actual exceeds uncapped formula
     results.push({
       key, name: d.name, short: d.short, county: d.county,
-      enrollment: d.enr.total, atRiskPct: d.atRiskPct, gca: d.gca,
+      enrollment: d.enr.total, atRiskPct: r.povertyRate, gca: d.gca,
+      cepCorrected: r.cepCorrected,
       custom: r.totalCustom, fy26Actual, sfraUncapped: r.sfraUncapped,
-      change, changePct: fy26Actual > 0 ? (change / fy26Actual) * 100 : 0,
+      changeFy26, changeFy26Pct: fy26Actual > 0 ? (changeFy26 / fy26Actual) * 100 : 0,
+      changeSfra, changeSfraPct: r.sfraUncapped > 0 ? (changeSfra / r.sfraUncapped) * 100 : 0,
+      floorCapBonus,
       perPupilCustom: r.perPupil,
       perPupilFy26: fy26Actual / d.enr.total,
       perPupilChange: r.perPupil - fy26Actual / d.enr.total,
@@ -112,18 +127,20 @@ export function calcStatewideRedistribution(params = {}) {
     totalSfraUncapped += r.sfraUncapped;
   }
 
-  results.sort((a, b) => b.change - a.change);
-  const gainers = results.filter(r => r.change > 0);
-  const losers = results.filter(r => r.change < 0).reverse();
+  // Sort by change vs uncapped SFRA (apples-to-apples formula comparison)
+  results.sort((a, b) => b.changeSfra - a.changeSfra);
+  const gainers = results.filter(r => r.changeSfra > 0);
+  const losers = results.filter(r => r.changeSfra < 0).reverse();
 
   return {
     results, gainers, losers,
     totalCustom, totalFy26, totalSfraUncapped,
     netChange: totalCustom - totalFy26,
+    netChangeSfra: totalCustom - totalSfraUncapped,
     districtCount: results.length,
     gainerCount: gainers.length,
     loserCount: losers.length,
-    totalGains: gainers.reduce((s, r) => s + r.change, 0),
-    totalLosses: losers.reduce((s, r) => s + r.change, 0),
+    totalGains: gainers.reduce((s, r) => s + r.changeSfra, 0),
+    totalLosses: losers.reduce((s, r) => s + r.changeSfra, 0),
   };
 }
