@@ -48,10 +48,13 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
       <div style={{ marginBottom: 20, padding: 16, background: "linear-gradient(135deg, #201428, #1a1914)", borderRadius: 12, border: "1px solid #3a2848" }}>
         <div style={{ fontSize: 14, color: "#c49aea", fontWeight: 600, marginBottom: 6 }}>🧪 Custom Aid Formula</div>
         <div style={{ fontSize: 12, color: "#8a7898", lineHeight: 1.6 }}>
-          Model an alternative to the SFRA's adequacy-minus-LFS approach. This formula computes aid as:
+          Model an alternative need-based formula. Like SFRA, this subtracts Local Fair Share from a need-based adequacy budget:
         </div>
         <div style={{ fontFamily: "'Instrument Serif', serif", fontSize: 18, color: "#d8b4fe", margin: "10px 0", padding: "10px 16px", background: "#12110e", borderRadius: 8, border: "1px solid #2a2030", display: "inline-block" }}>
-          Aid = Base × Poverty Rate<sup style={{fontSize:11}}>{p.povertyExponent !== 1 ? p.povertyExponent.toFixed(1) : ""}</sup> × Income Diversity Factor × Tax Burden Index × Enrollment
+          Aid = max(0, Need - LFS) + Categoricals
+        </div>
+        <div style={{ fontFamily: "'Instrument Serif', serif", fontSize: 14, color: "#a87ade", margin: "4px 0 0 16px" }}>
+          where Need = Base × (1 + Poverty{p.povertyExponent !== 1 ? <sup style={{fontSize:10}}>{p.povertyExponent.toFixed(1)}</sup> : ""} × IDF × TBI) × Enrollment
         </div>
         <div style={{ fontSize: 11, color: "#6a5878", marginTop: 6 }}>
           + optional SpEd categorical + Security aid + Transportation. Compared side-by-side with current SFRA.
@@ -183,10 +186,22 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
                 {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#d8b4fe", fontWeight: 600 }}>{r.custom.tbi.toFixed(3)}</td>)}
               </tr>
               <tr style={{ borderBottom: "1px solid #2a2820", background: "#1f1a28" }}>
-                <td style={{ padding: 8, color: "#c49aea", fontWeight: 600 }}>Compound Multiplier</td>
+                <td style={{ padding: 8, color: "#c49aea", fontWeight: 600 }}>Need Multiplier (Pov x IDF x TBI)</td>
                 {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#d8b4fe", fontWeight: 700, fontSize: 15 }}>
-                  {(r.custom.povertyFactor * r.custom.idf * r.custom.tbi).toFixed(4)}
+                  {r.custom.needMultiplier.toFixed(4)}
                 </td>)}
+              </tr>
+              <tr style={{ borderBottom: "1px solid #1f1e18" }}>
+                <td style={{ padding: 8, color: "#8a8778" }}>Core Need (adequacy)</td>
+                {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#e2e0d6" }}>{fmt(r.custom.coreNeed)}</td>)}
+              </tr>
+              <tr style={{ borderBottom: "1px solid #1f1e18" }}>
+                <td style={{ padding: 8, color: "#8a8778" }}><Tip term="LFS">Local Fair Share</Tip></td>
+                {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#e2e0d6" }}>{fmt(r.custom.lfs)}</td>)}
+              </tr>
+              <tr style={{ borderBottom: "1px solid #2a2820", background: "#1f1a28" }}>
+                <td style={{ padding: 8, color: "#c49aea", fontWeight: 600 }}>Core Aid (Need - LFS)</td>
+                {results.map(r => <td key={r.key} style={{ textAlign: "center", padding: 8, color: "#d8b4fe", fontWeight: 700 }}>{fmt(r.custom.coreAid)}</td>)}
               </tr>
             </tbody>
           </table>
@@ -291,7 +306,7 @@ export default function CustomFormulaView({ compared, addCompared, removeCompare
           <p>• <strong style={{ color: "#d8b4fe" }}>Poverty Exponent {'>'} 1</strong> makes the formula progressive: districts with 80% poverty get disproportionately more than those at 40%. At exponent 2.0, a district at 80% poverty receives 4× the weight of one at 40%.</p>
           <p>• <strong style={{ color: "#d8b4fe" }}>Income Diversity Factor</strong> rewards districts with heterogeneous income distributions, recognizing that income inequality within a district creates service delivery challenges absent in uniformly wealthy or uniformly poor communities.</p>
           <p>• <strong style={{ color: "#d8b4fe" }}>Tax Burden Index</strong> accounts for effort: districts with higher tax burden relative to income (TBI {'>'} 1.0) receive more aid. Weighting this rewards communities that are already stretching to fund schools.</p>
-          <p>• Unlike SFRA's Adequacy-minus-LFS approach, this formula doesn't subtract local capacity — it directly scales aid by need indicators. This means wealthy districts with high poverty (rare but possible) would still receive substantial aid.</p>
+          <p>• Like SFRA, this formula subtracts <strong style={{ color: "#d8b4fe" }}>Local Fair Share</strong> from the need-based adequacy budget. Wealthy districts with high EV and income get little or no core aid because their LFS exceeds their need. The key difference from SFRA is how "need" is computed: SFRA uses grade-weighted enrollment + at-risk/LEP add-ons, while this formula uses a compound poverty/diversity/effort multiplier.</p>
         </div>
       </div>
     </div>

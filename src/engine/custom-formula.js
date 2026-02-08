@@ -15,8 +15,22 @@ export function runCustomFormula(d, cd, params = {}) {
   const tbi = 1.0 + (cd.taxBurdenIndex - 1.0) * p.tbiWeight;
   const povertyFactor = Math.pow(povertyRate, p.povertyExponent);
 
-  // Core formula: Base × PovertyFactor × IDF × TBI × Enrollment
-  const coreAid = base * povertyFactor * idf * tbi * enrollment;
+  // Core need: Base × (1 + PovertyFactor × IDF × TBI) × Enrollment
+  // This computes an "adequacy" budget — what the district needs — weighted by need factors.
+  // The poverty/IDF/TBI multipliers add to a base of 1.0, so every district gets at least
+  // base × enrollment, with high-need districts getting more.
+  const needMultiplier = povertyFactor * idf * tbi;
+  const coreNeed = base * (1.0 + needMultiplier) * enrollment;
+
+  // Subtract Local Fair Share — same as SFRA: districts that can fund themselves get less aid.
+  // LFS = (avg3yrEV × evMult + aggregateIncome × incMult) / 2
+  const avgEV = (d.ev3yr[0] + d.ev3yr[1] + d.ev3yr[2]) / 3;
+  const evMult = FORMULA.evMult;
+  const incMult = FORMULA.incMult;
+  let lfs = (avgEV * evMult + d.income * incMult) / 2;
+
+  // Core equalization: need minus local capacity (floored at 0)
+  const coreAid = Math.max(0, coreNeed - lfs);
 
   // Add-ons (optional categorical)
   let spedAdd = 0;
@@ -32,7 +46,8 @@ export function runCustomFormula(d, cd, params = {}) {
   const perPupil = totalCustom / enrollment;
 
   return {
-    coreAid, spedAdd, secAdd, transAid: d.fy26Detail.trans,
+    coreNeed, coreAid, lfs, needMultiplier,
+    spedAdd, secAdd, transAid: d.fy26Detail.trans,
     totalCustom, perPupil,
     povertyRate, idf, tbi, povertyFactor,
     aidPctBudget: totalCustom / d.budget * 100,
