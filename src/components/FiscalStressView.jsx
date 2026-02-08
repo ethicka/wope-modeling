@@ -72,9 +72,55 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
     }).filter(Boolean);
   }, [compared, overrides]);
 
-  // Chart data for compared districts with detail
+  // Detail districts (those with hand-coded fiscal stress history)
   const detailDistricts = comparedResults.filter(r => r.district.fiscalStress);
 
+  // ── Universal chart data (works for ALL districts) ──
+  // Indicator score comparison (grouped bar)
+  const indicatorCompareData = useMemo(() => {
+    if (comparedResults.length === 0) return null;
+    return ["aid-decline", "spend-above", "state-dependency", "tax-exhaustion"].map(id => {
+      const labels = { "aid-decline": "Aid Decline", "spend-above": "Over Adequacy", "state-dependency": "State Dep.", "tax-exhaustion": "Tax Capacity" };
+      const row = { indicator: labels[id] };
+      comparedResults.forEach(r => {
+        const ind = r.stress.indicators.find(i => i.id === id);
+        row[r.district.short || r.key] = ind ? ind.score : 0;
+      });
+      return row;
+    });
+  }, [comparedResults]);
+
+  // Budget breakdown comparison (stacked bar)
+  const budgetBreakdownData = useMemo(() => {
+    if (comparedResults.length === 0) return null;
+    return comparedResults.map(r => {
+      const d = r.district;
+      const u = d.ufb || {};
+      const budget = u.totalBudget || d.budget || 1;
+      return {
+        name: d.short || d.name.split(" ")[0],
+        "Local Tax Levy": (u.localTaxLevy || d.levy || 0) / 1e6,
+        "State Aid": (u.stateAid || d.fy26 || 0) / 1e6,
+        "Adequacy (SFRA)": r.stress.formula.adequacy / 1e6,
+        budget: budget / 1e6,
+        color: d.color,
+      };
+    });
+  }, [comparedResults]);
+
+  // EV trend (3 years, all districts have ev3yr)
+  const evTrendData = useMemo(() => {
+    if (comparedResults.length === 0) return null;
+    return ["EV Yr 1", "EV Yr 2", "EV Yr 3"].map((yr, i) => {
+      const row = { year: yr };
+      comparedResults.forEach(r => {
+        row[r.district.short || r.key] = (r.district.ev3yr[2 - i] || 0) / 1e9; // oldest first
+      });
+      return row;
+    });
+  }, [comparedResults]);
+
+  // Fund balance (only focal districts)
   const fbTrendData = detailDistricts.length > 0
     ? detailDistricts[0].district.fiscalStress.fundBalanceHistory.map((_, i) => {
         const row = { year: detailDistricts[0].district.fiscalStress.fundBalanceHistory[i].year };
@@ -85,6 +131,7 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
       })
     : null;
 
+  // ESSER (only focal districts)
   const esserYears = ["FY21", "FY22", "FY23", "FY24", "FY25"];
   const esserData = detailDistricts.length > 0
     ? esserYears.map((yr, i) => {
@@ -199,16 +246,113 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
         </>
       )}
 
-      {/* ── Detail Charts (for districts with fiscal stress history) ── */}
-      {detailDistricts.length > 0 && (
+      {/* ── Charts (for ALL compared districts) ── */}
+      {comparedResults.length > 0 && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
-          {/* Fund Balance Trend */}
+          {/* Indicator Score Comparison */}
+          {indicatorCompareData && (
+            <div style={{ padding: 20, background: "#1a1914", borderRadius: 12, border: "1px solid #2a2820" }}>
+              <div style={{ fontSize: 13, color: "#6a6758", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
+                Stress Indicator Breakdown
+              </div>
+              <div style={{ fontSize: 11, color: "#5a5848", marginBottom: 12 }}>Score per indicator (0–25 each)</div>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={indicatorCompareData} margin={{ left: 0, right: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#2a2820" />
+                  <XAxis dataKey="indicator" tick={{ fill: "#6a6758", fontSize: 10 }} axisLine={false} interval={0} />
+                  <YAxis tick={{ fill: "#6a6758", fontSize: 11 }} axisLine={false} tickLine={false} domain={[0, 25]} />
+                  <Tooltip contentStyle={{ background: "#1a1914", border: "1px solid #2a2820", borderRadius: 8, color: "#e2e0d6", fontSize: 12 }}
+                    formatter={v => `${v}/25`} />
+                  {comparedResults.map(r => (
+                    <Bar key={r.key} dataKey={r.district.short || r.key} fill={r.district.color} opacity={0.8} name={r.district.name} />
+                  ))}
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Budget vs Adequacy + Revenue Sources */}
+          {budgetBreakdownData && (
+            <div style={{ padding: 20, background: "#1a1914", borderRadius: 12, border: "1px solid #2a2820" }}>
+              <div style={{ fontSize: 13, color: "#6a6758", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
+                Revenue Sources vs Adequacy ($M)
+              </div>
+              <div style={{ fontSize: 11, color: "#5a5848", marginBottom: 12 }}>Local levy + state aid vs SFRA adequacy budget</div>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={budgetBreakdownData} margin={{ left: 0, right: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#2a2820" />
+                  <XAxis dataKey="name" tick={{ fill: "#6a6758", fontSize: 10 }} axisLine={false} />
+                  <YAxis tick={{ fill: "#6a6758", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={{ background: "#1a1914", border: "1px solid #2a2820", borderRadius: 8, color: "#e2e0d6", fontSize: 12 }}
+                    formatter={v => `$${v.toFixed(1)}M`} />
+                  <Bar dataKey="Local Tax Levy" fill="#3b82f6" stackId="rev" opacity={0.8} />
+                  <Bar dataKey="State Aid" fill="#8b5cf6" stackId="rev" opacity={0.8} />
+                  <Bar dataKey="Adequacy (SFRA)" fill="#ef444440" stroke="#ef4444" strokeWidth={1} strokeDasharray="4 2" />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Equalized Value Trend (3 years) */}
+          {evTrendData && (
+            <div style={{ padding: 20, background: "#1a1914", borderRadius: 12, border: "1px solid #2a2820" }}>
+              <div style={{ fontSize: 13, color: "#6a6758", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
+                Equalized Valuation Trend ($B)
+              </div>
+              <div style={{ fontSize: 11, color: "#5a5848", marginBottom: 12 }}>3-year property value trajectory — flat or declining = eroding tax base</div>
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={evTrendData} margin={{ left: 0, right: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#2a2820" />
+                  <XAxis dataKey="year" tick={{ fill: "#6a6758", fontSize: 11 }} axisLine={false} />
+                  <YAxis tick={{ fill: "#6a6758", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={{ background: "#1a1914", border: "1px solid #2a2820", borderRadius: 8, color: "#e2e0d6", fontSize: 12 }}
+                    formatter={v => `$${v.toFixed(2)}B`} />
+                  {comparedResults.map(r => (
+                    <Line key={r.key} type="monotone" dataKey={r.district.short || r.key} stroke={r.district.color}
+                      strokeWidth={2} dot={{ r: 3, fill: r.district.color }} name={r.district.name} />
+                  ))}
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* FY25→FY26 Aid Change Comparison */}
+          <div style={{ padding: 20, background: "#1a1914", borderRadius: 12, border: "1px solid #2a2820" }}>
+            <div style={{ fontSize: 13, color: "#6a6758", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
+              State Aid Change FY25 → FY26
+            </div>
+            <div style={{ fontSize: 11, color: "#5a5848", marginBottom: 12 }}>Year-over-year state aid trajectory</div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={comparedResults.map(r => ({
+                name: r.district.short || r.district.name.split(" ")[0],
+                change: r.stress.aidChangePct,
+                color: r.district.color,
+              }))} margin={{ left: 0, right: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#2a2820" />
+                <XAxis dataKey="name" tick={{ fill: "#6a6758", fontSize: 10 }} axisLine={false} />
+                <YAxis tick={{ fill: "#6a6758", fontSize: 11 }} axisLine={false} tickLine={false} unit="%" />
+                <Tooltip contentStyle={{ background: "#1a1914", border: "1px solid #2a2820", borderRadius: 8, color: "#e2e0d6", fontSize: 12 }}
+                  formatter={v => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`} />
+                <ReferenceLine y={0} stroke="#6a6758" strokeDasharray="4 4" />
+                <Bar dataKey="change" name="Aid Change %">
+                  {comparedResults.map(r => (
+                    <Cell key={r.key} fill={r.stress.aidChangePct < 0 ? "#ef4444" : "#22c55e"} opacity={0.8} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* ── Focal district bonus: Fund Balance Trend ── */}
           {fbTrendData && (
             <div style={{ padding: 20, background: "#1a1914", borderRadius: 12, border: "1px solid #2a2820" }}>
               <div style={{ fontSize: 13, color: "#6a6758", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
                 Fund Balance as % of Budget
               </div>
-              <div style={{ fontSize: 11, color: "#5a5848", marginBottom: 12 }}>Declining reserves signal structural deficit</div>
+              <div style={{ fontSize: 11, color: "#5a5848", marginBottom: 12 }}>Historical reserves (detailed districts only)</div>
               <ResponsiveContainer width="100%" height={200}>
                 <LineChart data={fbTrendData} margin={{ left: 0, right: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#2a2820" />
@@ -227,7 +371,7 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
             </div>
           )}
 
-          {/* ESSER Spend-Down */}
+          {/* ── Focal district bonus: ESSER Spend-Down ── */}
           {esserData && (
             <div style={{ padding: 20, background: "#1a1914", borderRadius: 12, border: "1px solid #2a2820" }}>
               <div style={{ fontSize: 13, color: "#6a6758", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
@@ -250,26 +394,28 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
             </div>
           )}
 
-          {/* ESSER Cliff Cards */}
-          <div style={{ gridColumn: "1 / -1", display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {detailDistricts.map(r => {
-              const es = r.district.fiscalStress.esser;
-              const cliffPct = (es.cliffExposure / (r.district.ufb?.totalBudget || r.district.budget)) * 100;
-              return (
-                <div key={r.key} style={{ flex: 1, minWidth: 200, padding: 12, background: "#12110e", borderRadius: 8, border: `1px solid ${r.district.color}25` }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: r.district.color }}>{r.district.short || r.district.name}</span>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: cliffPct > 3 ? "#ef4444" : cliffPct > 1 ? "#f59e0b" : "#22c55e" }}>{fmt(es.cliffExposure)}</span>
+          {/* ── Focal district bonus: ESSER Cliff Cards ── */}
+          {detailDistricts.length > 0 && (
+            <div style={{ gridColumn: "1 / -1", display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {detailDistricts.map(r => {
+                const es = r.district.fiscalStress.esser;
+                const cliffPct = (es.cliffExposure / (r.district.ufb?.totalBudget || r.district.budget)) * 100;
+                return (
+                  <div key={r.key} style={{ flex: 1, minWidth: 200, padding: 12, background: "#12110e", borderRadius: 8, border: `1px solid ${r.district.color}25` }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: r.district.color }}>{r.district.short || r.district.name}</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: cliffPct > 3 ? "#ef4444" : cliffPct > 1 ? "#f59e0b" : "#22c55e" }}>{fmt(es.cliffExposure)}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8a8778" }}>
+                      <span>{es.positionsFundedByEsser} positions at risk</span>
+                      <span>{cliffPct.toFixed(1)}% of budget</span>
+                    </div>
+                    <div style={{ fontSize: 10, color: "#5a5848", marginTop: 4, lineHeight: 1.4 }}>{es.usedFor.join(" · ")}</div>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8a8778" }}>
-                    <span>{es.positionsFundedByEsser} positions at risk</span>
-                    <span>{cliffPct.toFixed(1)}% of budget</span>
-                  </div>
-                  <div style={{ fontSize: 10, color: "#5a5848", marginTop: 4, lineHeight: 1.4 }}>{es.usedFor.join(" · ")}</div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
