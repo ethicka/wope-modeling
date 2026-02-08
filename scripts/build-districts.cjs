@@ -307,11 +307,66 @@ for (const [key, gbm] of Object.entries(gbmDistricts)) {
   const evCurrent = ev?.evEqTable || ev?.ev || 0;
   const ev3yr = [evCurrent, Math.round(evCurrent * 0.96), Math.round(evCurrent * 0.92)];
 
-  // Aggregate income: back-calculate from LFS if we can
-  // LFS = (avgEV × evMult + income × incMult) / 2
-  // For now, estimate from levy and tax burden (~4.5% statewide avg)
+  // Aggregate income: back-calculate from LFS formula for districts with equalization aid
+  // SFRA: LFS = (avgEV × evMult + Income × incMult) / 2
+  //        EqAid = max(0, Adequacy - LFS)
+  // If eqAid > 0, we can compute: LFS = Adequacy - EqAid
+  //   => Income = (2 × LFS - avgEV × evMult) / incMult
+  // For districts with eqAid = 0, LFS >= Adequacy so we can only set a lower bound
   const levy = rev?.totalTaxLevy || ev?.genFundLevy || 0;
-  const estIncome = levy > 0 ? Math.round(levy / 0.05) : 0; // rough estimate
+  const evMult = 0.014949314;
+  const incMult = 0.059963161;
+  const eqAidActual = gbm.fy26Detail.eq || 0;
+
+  let estIncome;
+  if (eqAidActual > 0 && evCurrent > 0) {
+    // Back-calculate: we need adequacy first. We can approximate it from the formula components.
+    // Adequacy ~ (EqAid + LFS), so LFS ~ FY26_total - sped - trans - sec (but capped by FY25 caps)
+    // More directly: the GBM provides the equalization aid component, which = Adequacy - LFS
+    // We need adequacy, but don't have it directly. Use an approximation:
+    // Total formula aid ≈ eqAid + sped + trans + sec
+    // But total is capped. For districts with eq aid, the uncapped formula total is likely close.
+    // Better approach: estimate LFS from the aid structure
+    // If we had adequacy, LFS = adequacy - eqAid. But we can estimate adequacy from enrollment.
+    // Simplified: use base enrollment weights to approximate adequacy
+    const basePerPupil = 14972;
+    const gw = { elem: 1.0, mid: 1.04, hs: 1.15 };
+    const baseEnr = (enr.elem || 0) * gw.elem + (enr.mid || 0) * gw.mid + (enr.hs || 0) * gw.hs;
+    // At-risk cost approximation
+    const arPct = enr.frlPct;
+    const arW = arPct <= 0.20 ? 0.47 : arPct >= 0.60 ? 0.57 : 0.47 + ((arPct - 0.20) / 0.40) * 0.10;
+    const arOnly = enr.frl - combo;
+    const lepOnly = enr.ml - combo;
+    const arCost = arOnly * arW * basePerPupil;
+    const lepCost = lepOnly * 0.50 * basePerPupil;
+    const comboCost = combo * (arW + 0.125) * basePerPupil;
+    // SpEd census (2/3 portion in adequacy)
+    const spedCensus = total * 0.165 * 23172;
+    const speechCensus = total * 0.0168 * 1414;
+    const estAdequacy = (baseEnr * basePerPupil + arCost + lepCost + comboCost + (2/3) * (spedCensus + speechCensus)) * gca;
+    const estLFS = Math.max(0, estAdequacy - eqAidActual);
+    const avgEV = (ev3yr[0] + ev3yr[1] + ev3yr[2]) / 3;
+    const backCalc = Math.round((2 * estLFS - avgEV * evMult) / incMult);
+    if (backCalc > 0) {
+      estIncome = backCalc;
+    } else {
+      // Back-calc went negative (EV dominates LFS for high-poverty cities)
+      // Fall back to DFG-based burden estimate
+      const dfgBurdenFallback = { 'A': 0.035, 'B': 0.040, 'CD': 0.045, 'DE': 0.048,
+        'FG': 0.052, 'GH': 0.058, 'I': 0.065, 'J': 0.075 };
+      const bEst = dfgBurdenFallback[dfg] || 0.04;
+      estIncome = levy > 0 ? Math.round(levy / bEst) : 0;
+    }
+  } else if (evCurrent > 0 && levy > 0) {
+    // No equalization aid — district is wealthy. LFS >= Adequacy.
+    // Use a DFG-based tax burden estimate instead of flat 5%
+    const dfgBurden = { 'A': 0.035, 'B': 0.040, 'CD': 0.045, 'DE': 0.048,
+      'FG': 0.052, 'GH': 0.058, 'I': 0.065, 'J': 0.075 };
+    const burdenEst = dfgBurden[dfg] || 0.05;
+    estIncome = Math.round(levy / burdenEst);
+  } else {
+    estIncome = levy > 0 ? Math.round(levy / 0.05) : 0;
+  }
 
   // Budget from UFB revenue total
   const budget = rev?.totalBudget || Math.round(gbm.fy26 + levy + (rev?.federalAid || 0));

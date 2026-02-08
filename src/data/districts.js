@@ -2,9 +2,7 @@ import { DISTRICTS as GEN_DISTRICTS } from './districts-generated.js';
 
 // West Orange hand-coded extras (budgetItems, detailed ufb with FY27 projections)
 const WO_EXTRAS = {
-  type: "Suburban",
   ev3yr: [10002286871, 9580000000, 9200000000],
-  income: 2280000000,
   budget: 203423298,
   ufb: {
     totalBudget: 200805708,
