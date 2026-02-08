@@ -6,13 +6,15 @@ import { fmt, fmtPct, fmtNum } from '../utils/format.js';
 import Pill from './ui/Pill.jsx';
 import Tip from './ui/Tip.jsx';
 import StatCard from './ui/StatCard.jsx';
+import DistrictSearch from './ui/DistrictSearch.jsx';
 
 export default function ProfilesView({ selected, setSelected }) {
   const d = DISTRICTS[selected];
+  if (!d) return <div style={{ color: "#8a8778" }}>Select a district to view its profile.</div>;
   const r = runFormula(d);
   const aidBreakdown = [
     { name: "Equalization", value: d.fy26Detail.eq, fill: d.color },
-    { name: "Sp. Ed.", value: d.fy26Detail.sped, fill: d.accent },
+    { name: "Sp. Ed.", value: d.fy26Detail.sped, fill: d.accent || "#60a5fa" },
     { name: "Transport", value: d.fy26Detail.trans, fill: "#a78bfa" },
     { name: "Security", value: d.fy26Detail.sec, fill: "#fbbf24" },
   ];
@@ -24,17 +26,15 @@ export default function ProfilesView({ selected, setSelected }) {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
-        {Object.entries(DISTRICTS).map(([k, v]) => (
-          <Pill key={k} active={selected === k} onClick={() => setSelected(k)} color={v.color}>{v.name}</Pill>
-        ))}
+      <div style={{ marginBottom: 16 }}>
+        <DistrictSearch onSelect={setSelected} placeholder="Search by district name, county..." />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
         <div style={{ padding: 20, background: "#1a1914", borderRadius: 12, border: "1px solid #2a2820" }}>
           <div style={{ fontSize: 13, color: "#6a6758", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>District Profile</div>
           <div style={{ fontSize: 28, fontWeight: 700, color: d.color, fontFamily: "'Instrument Serif', serif", marginBottom: 4 }}>{d.name}</div>
-          <div style={{ fontSize: 14, color: "#8a8778" }}>{d.county} County · {d.type} · <Tip term="GCA">GCA</Tip>: {d.gca}</div>
+          <div style={{ fontSize: 14, color: "#8a8778" }}>{d.county} County · {d.type} · <Tip term="GCA">GCA</Tip>: {d.gca}{d.dfg ? ` · DFG: ${d.dfg}` : ""}</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 16 }}>
             <div><span style={{ fontSize: 11, color: "#6a6758" }}>ENROLLMENT {d.onRoll ? "(RESIDENT)" : ""}</span><br/><span style={{ fontSize: 18, fontWeight: 600, color: "#e2e0d6" }}>{fmtNum(d.enr.total)}{d.onRoll ? <span style={{ fontSize: 12, color: "#6a6758" }}> ({fmtNum(d.onRoll)} on-roll)</span> : ""}</span></div>
             <div><span style={{ fontSize: 11, color: "#6a6758" }}>AT-RISK % (<Tip term="FRL">FRL</Tip>)</span><br/><span style={{ fontSize: 18, fontWeight: 600, color: "#e2e0d6" }}>{(d.atRiskPct * 100).toFixed(0)}%</span></div>

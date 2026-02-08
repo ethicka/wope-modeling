@@ -4,13 +4,14 @@ import { DISTRICTS } from '../data/districts.js';
 import { runFormula } from '../engine/sfra-formula.js';
 import { fmt, fmtPct } from '../utils/format.js';
 import Tip from './ui/Tip.jsx';
+import { ComparisonBar } from './ui/DistrictSearch.jsx';
 
-export default function BudgetView({ overrides }) {
+export default function BudgetView({ compared, addCompared, removeCompared, overrides }) {
   const [budgetYear, setBudgetYear] = useState("fy26");
   const hasOverrides = Object.keys(overrides).length > 0;
   const isFy27 = budgetYear === "fy27";
 
-  const results = Object.entries(DISTRICTS).map(([k, d]) => {
+  const results = compared.map(k => [k, DISTRICTS[k]]).filter(([, d]) => d).map(([k, d]) => {
     const rBase = runFormula(d);
     const rScen = runFormula(d, overrides);
     const u = d.ufb;
@@ -66,6 +67,7 @@ export default function BudgetView({ overrides }) {
 
   return (
     <div>
+      <ComparisonBar compared={compared} districts={DISTRICTS} onRemove={removeCompared} onAdd={addCompared} />
       <div style={{ marginBottom: 20, padding: 16, background: "linear-gradient(135deg, #1a1420, #141018)", borderRadius: 12, border: "1px solid #2a2040" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
@@ -160,7 +162,7 @@ export default function BudgetView({ overrides }) {
                 }},
                 { label: "Eq. Tax Rate (scenario)", fn: r => `${r.eqTaxRateScenario.toFixed(3)}%` },
               ].map((row, i) => {
-                if (row.label === "sep") return <tr key={i}><td colSpan={5} style={{ height: 4, background: "#1f1e18" }}></td></tr>;
+                if (row.label === "sep") return <tr key={i}><td colSpan={results.length + 1} style={{ height: 4, background: "#1f1e18" }}></td></tr>;
                 return (
                   <tr key={i} style={{ borderBottom: "1px solid #1f1e18" }}>
                     <td style={{ padding: "7px 10px", color: "#8a8778" }}>{row.label}</td>

@@ -7,14 +7,15 @@ import { runFormula } from '../engine/sfra-formula.js';
 import { fmt, fmtPct } from '../utils/format.js';
 import Pill from './ui/Pill.jsx';
 import Tip from './ui/Tip.jsx';
+import { ComparisonBar } from './ui/DistrictSearch.jsx';
 
-export default function ProjectionView({ overrides }) {
+export default function ProjectionView({ compared, addCompared, removeCompared, overrides }) {
   const [growth, setGrowth] = useState(GROWTH_DEFAULTS);
   const [noLevyCap, setNoLevyCap] = useState(false);
   const setG = (k, v) => setGrowth(prev => ({ ...prev, [k]: v }));
   const years = [2026, 2027, 2028, 2029, 2030];
 
-  const projections = Object.entries(DISTRICTS).map(([k, baseD]) => {
+  const projections = compared.map(k => [k, DISTRICTS[k]]).filter(([, d]) => d).map(([k, baseD]) => {
     let prevAid = baseD.fy25;
 
     const baseBudget = baseD.ufb.totalBudget;
@@ -89,7 +90,7 @@ export default function ProjectionView({ overrides }) {
       const cappedTaxRate = avgEV > 0 ? (cappedLevy / avgEV) * 100 : 0;
       const necessaryTaxRate = avgEV > 0 ? (necessaryLevy / avgEV) * 100 : 0;
 
-      const estHouseholds = baseD.income / (CUSTOM_DATA[k]?.medianIncome || 70000);
+      const estHouseholds = baseD.income / (CUSTOM_DATA[k]?.medianIncome || 80000);
       const cappedTaxPerHH = cappedLevy / estHouseholds;
       const necessaryTaxPerHH = necessaryLevy / estHouseholds;
 
@@ -147,6 +148,7 @@ export default function ProjectionView({ overrides }) {
 
   return (
     <div>
+      <ComparisonBar compared={compared} districts={DISTRICTS} onRemove={removeCompared} onAdd={addCompared} />
       {/* Adjustable Assumptions Panel */}
       <div style={{ marginBottom: 20, padding: 16, background: "linear-gradient(135deg, #1a2014, #1a1914)", borderRadius: 12, border: "1px solid #2a3820" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
