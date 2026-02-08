@@ -1,43 +1,81 @@
 import { runFormula } from './sfra-formula.js';
+import { FISCAL_DATA } from '../data/fiscal-stress-generated.js';
 
 /**
  * Fiscal Stress scoring engine — works for ANY NJ district.
  *
  * Computes a 0–100 composite score from 4 indicators (0–25 each):
- *   1. Declining State Aid     — FY25→FY26 aid trajectory
+ *   1. Declining Fund Balance  — FY2018→FY2026 unrestricted surplus trend
  *   2. Spending Above Adequacy — budget exceeds SFRA formula adequacy
- *   3. State Aid Dependency    — state aid as % of budget (vulnerability to state decisions)
- *   4. Tax Capacity Exhaustion — equalized tax rate vs capacity (how hard the district is already taxing)
+ *   3. ESSER Cliff Exposure    — total ESSER allocation as % of budget (now expired)
+ *   4. Tax Capacity Exhaustion — equalized tax rate vs capacity
  *
- * Districts with detailed `fiscalStress` data get enriched descriptions
- * including fund balance history, ESSER detail, and revenue/cost growth rates.
+ * Uses real ESSER allocations and audited fund balance data from NJ DOE.
  */
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
-export function scoreDistrict(d, overrides = {}) {
+export function scoreDistrict(d, overrides = {}, distKey = null) {
   const formula = runFormula(d, overrides);
   const u = d.ufb || {};
   const budget = u.totalBudget || d.budget || 1;
-  const fs = d.fiscalStress; // detailed data for focal districts only
+  const fs = d.fiscalStress; // hand-coded detail for focal districts
+  const fd = distKey ? FISCAL_DATA[distKey] : null; // generated fiscal data
 
   const indicators = [];
 
-  // ── 1. Declining State Aid ──────────────────────────────────
-  const aidChange = d.fy25 > 0 ? ((d.fy26 - d.fy25) / d.fy25) * 100 : 0;
-  // Losing >6% of aid in one year = max score; gaining aid = 0
-  const aidScore = clamp((-aidChange / 6) * 25, 0, 25);
+  // ── 1. Declining Fund Balance ─────────────────────────────────
+  // Use real fund balance history from UFB recap data (all districts)
+  const fb = fd?.fundBalance || {};
+  const fbYears = Object.keys(fb).map(Number).sort();
+  let fbDeclineScore = 0;
+  let fbPctOfBudget = null;
+  let fbTrend = null;
+
+  if (fbYears.length >= 3) {
+    // Current fund balance as % of budget
+    const latestFb = fb[fbYears[fbYears.length - 1]] || 0;
+    fbPctOfBudget = (latestFb / budget) * 100;
+
+    // Calculate trend: compare recent 3-year avg to earlier 3-year avg
+    const recentYrs = fbYears.slice(-3);
+    const earlyYrs = fbYears.slice(0, Math.min(3, fbYears.length - 3));
+    const recentAvg = recentYrs.reduce((s, y) => s + (fb[y] || 0), 0) / recentYrs.length;
+    const earlyAvg = earlyYrs.length > 0
+      ? earlyYrs.reduce((s, y) => s + (fb[y] || 0), 0) / earlyYrs.length
+      : recentAvg;
+
+    // Trend: negative = declining reserves
+    fbTrend = earlyAvg > 0 ? ((recentAvg - earlyAvg) / earlyAvg) * 100 : 0;
+
+    // Score: low current balance + declining trend = high stress
+    // Current balance component (0-15): below 2% of budget is critical
+    const balComponent = clamp(((5 - fbPctOfBudget) / 5) * 15, 0, 15);
+    // Trend component (0-10): declining >30% from peak = max
+    const trendComponent = fbTrend < 0 ? clamp((-fbTrend / 50) * 10, 0, 10) : 0;
+    fbDeclineScore = balComponent + trendComponent;
+  } else if (fs?.fundBalanceHistory) {
+    // Fallback to hand-coded data for focal districts
+    const hist = fs.fundBalanceHistory;
+    fbPctOfBudget = hist[hist.length - 1].pctBudget;
+    const first = hist[0].pctBudget;
+    fbTrend = ((fbPctOfBudget - first) / Math.max(first, 0.1)) * 100;
+    const balComponent = clamp(((5 - fbPctOfBudget) / 5) * 15, 0, 15);
+    const trendComponent = fbTrend < 0 ? clamp((-fbTrend / 50) * 10, 0, 10) : 0;
+    fbDeclineScore = balComponent + trendComponent;
+  }
+
   indicators.push({
-    id: "aid-decline",
-    label: "Declining State Aid",
-    score: Math.round(aidScore),
+    id: "fund-balance",
+    label: "Declining Fund Balance",
+    score: Math.round(fbDeclineScore),
     max: 25,
-    severity: aidScore > 15 ? "critical" : aidScore > 8 ? "warning" : "stable",
-    detail: fs
-      ? `Aid changed ${aidChange >= 0 ? "+" : ""}${aidChange.toFixed(1)}% (FY25→FY26). Reserve at ${fs.fundBalanceHistory[fs.fundBalanceHistory.length - 1].pctBudget.toFixed(1)}% of budget.`
-      : `State aid changed ${aidChange >= 0 ? "+" : ""}${aidChange.toFixed(1)}% from FY25 to FY26`,
-    metric: `${aidChange >= 0 ? "+" : ""}${aidChange.toFixed(1)}%`,
-    raw: aidChange,
+    severity: fbDeclineScore > 15 ? "critical" : fbDeclineScore > 8 ? "warning" : "stable",
+    detail: fbPctOfBudget !== null
+      ? `Unrestricted surplus is ${fbPctOfBudget.toFixed(1)}% of budget${fbTrend !== null ? ` (${fbTrend >= 0 ? "+" : ""}${fbTrend.toFixed(0)}% trend)` : ''}`
+      : 'No fund balance data available',
+    metric: fbPctOfBudget !== null ? `${fbPctOfBudget.toFixed(1)}%` : '—',
+    raw: fbPctOfBudget || 0,
   });
 
   // ── 2. Spending Above Adequacy ──────────────────────────────
@@ -59,67 +97,57 @@ export function scoreDistrict(d, overrides = {}) {
     raw: gapPct,
   });
 
-  // ── 3. State Aid Dependency ─────────────────────────────────
-  // Districts with >70% of budget from state aid are extremely vulnerable
-  // to state funding decisions — a single legislative change can devastate them.
-  const stateAid = u.stateAid || d.fy26 || 0;
-  const stateDepPct = budget > 0 ? (stateAid / budget) * 100 : 0;
-  // Scale: 40% = starts scoring, 90% = max score
-  const depScore = clamp(((stateDepPct - 40) / 50) * 25, 0, 25);
-  let depDetail;
-  if (fs && fs.esser) {
-    const cliffPct = (fs.esser.cliffExposure / budget) * 100;
-    depDetail = `State aid is ${stateDepPct.toFixed(0)}% of budget. Additionally, ${fs.esser.positionsFundedByEsser} ESSER-funded positions at risk (${cliffPct.toFixed(1)}% cliff exposure).`;
+  // ── 3. ESSER Cliff Exposure ────────────────────────────────
+  // Total ESSER allocation (I + II + III) as % of budget — these funds are now
+  // EXPIRED. Districts that had high ESSER dependency face a fiscal cliff.
+  const esser = fd?.esser || (fs?.esser ? {
+    total: (fs.esser.total || 0),
+    i: 0, ii: 0, iii: 0,
+  } : null);
+  const esserTotal = esser?.total || 0;
+  // Annualized: ESSER was spread over ~4 years (FY21-FY24), so annual impact ≈ total/4
+  const esserAnnual = esserTotal / 4;
+  const esserPct = budget > 0 ? (esserAnnual / budget) * 100 : 0;
+  // Districts where annualized ESSER was >5% of budget had severe dependency
+  const esserScore = clamp((esserPct / 8) * 25, 0, 25);
+  let esserDetail;
+  if (fs?.esser) {
+    esserDetail = `Total ESSER: $${(esserTotal / 1e6).toFixed(1)}M (${esserPct.toFixed(1)}% annual). ${fs.esser.positionsFundedByEsser} positions funded. Used for: ${fs.esser.usedFor.join(', ')}`;
+  } else if (esserTotal > 0) {
+    esserDetail = `Total ESSER allocation: $${(esserTotal / 1e6).toFixed(1)}M (~${esserPct.toFixed(1)}% of budget annually). These funds expired Sept 2024.`;
   } else {
-    depDetail = stateDepPct > 70
-      ? `State aid is ${stateDepPct.toFixed(0)}% of budget — a single state funding decision could force massive cuts`
-      : stateDepPct > 40
-        ? `State aid is ${stateDepPct.toFixed(0)}% of budget — moderate vulnerability to state funding shifts`
-        : `State aid is only ${stateDepPct.toFixed(0)}% of budget — primarily locally funded`;
+    esserDetail = 'No ESSER allocation data available';
   }
   indicators.push({
-    id: "state-dependency",
-    label: "State Aid Dependency",
-    score: Math.round(depScore),
+    id: "esser-cliff",
+    label: "ESSER Cliff Exposure",
+    score: Math.round(esserScore),
     max: 25,
-    severity: depScore > 15 ? "critical" : depScore > 8 ? "warning" : "stable",
-    detail: depDetail,
-    metric: `${stateDepPct.toFixed(0)}%`,
-    raw: stateDepPct,
+    severity: esserScore > 15 ? "critical" : esserScore > 8 ? "warning" : "stable",
+    detail: esserDetail,
+    metric: esserTotal > 0 ? `$${(esserTotal / 1e6).toFixed(1)}M` : '—',
+    raw: esserPct,
   });
 
   // ── 4. Tax Capacity Exhaustion ──────────────────────────────
-  // Equalized school tax rate: levy / EV. Higher = less room to raise local revenue.
-  // NJ average is ~1.0–1.2%. Districts above 1.5% are tapped out.
-  // Districts with very LOW rates but high state dependency (like Newark at 0.56%)
-  // score low here — their stress shows up in indicator 3 instead.
   const avgEV = (d.ev3yr[0] + d.ev3yr[1] + d.ev3yr[2]) / 3;
   const levy = u.localTaxLevy || d.levy || 0;
   const eqTaxRate = avgEV > 0 ? (levy / avgEV) * 100 : 0;
-  // Also compare actual levy to formula's LFS — if levy >> LFS, overtaxing
   const levyVsLfs = formula.lfs > 0 ? (levy / formula.lfs) * 100 : 100;
-  // Composite: high tax rate + overtaxing vs LFS
   const taxScore = clamp(
-    ((eqTaxRate - 1.0) / 1.5) * 15 + // tax rate component (1.0% threshold, 2.5% = max)
-    ((Math.max(0, levyVsLfs - 100)) / 80) * 10, // overtaxing component (>100% of LFS)
+    ((eqTaxRate - 1.0) / 1.5) * 15 +
+    ((Math.max(0, levyVsLfs - 100)) / 80) * 10,
     0, 25
   );
-  let taxDetail;
-  if (fs) {
-    const fbEnd = fs.fundBalanceHistory[fs.fundBalanceHistory.length - 1];
-    taxDetail = `Eq. tax rate ${eqTaxRate.toFixed(3)}%, levy is ${levyVsLfs.toFixed(0)}% of formula LFS. Fund balance at ${fbEnd.pctBudget.toFixed(1)}% of budget.`;
-  } else {
-    taxDetail = eqTaxRate > 1.5
-      ? `Eq. tax rate ${eqTaxRate.toFixed(3)}% (high) — levy is ${levyVsLfs.toFixed(0)}% of formula LFS, limited room for local increases`
-      : `Eq. tax rate ${eqTaxRate.toFixed(3)}% — levy is ${levyVsLfs.toFixed(0)}% of formula LFS`;
-  }
   indicators.push({
     id: "tax-exhaustion",
     label: "Tax Capacity Exhaustion",
     score: Math.round(taxScore),
     max: 25,
     severity: taxScore > 15 ? "critical" : taxScore > 8 ? "warning" : "stable",
-    detail: taxDetail,
+    detail: eqTaxRate > 1.5
+      ? `Eq. tax rate ${eqTaxRate.toFixed(3)}% (high) — levy is ${levyVsLfs.toFixed(0)}% of formula LFS, limited room for local increases`
+      : `Eq. tax rate ${eqTaxRate.toFixed(3)}% — levy is ${levyVsLfs.toFixed(0)}% of formula LFS`,
     metric: `${eqTaxRate.toFixed(2)}%`,
     raw: eqTaxRate,
   });
@@ -127,18 +155,23 @@ export function scoreDistrict(d, overrides = {}) {
   const totalScore = indicators.reduce((s, ind) => s + ind.score, 0);
 
   return {
-    key: null, // set by caller
+    key: null,
     indicators,
     totalScore,
     maxScore: 100,
     level: totalScore >= 65 ? "severe" : totalScore >= 40 ? "elevated" : totalScore >= 20 ? "moderate" : "low",
     formula,
     hasDetail: !!fs,
+    hasFiscalData: !!fd,
     // Quick-access metrics for table sorting
-    aidChangePct: aidChange,
+    aidChangePct: d.fy25 > 0 ? ((d.fy26 - d.fy25) / d.fy25) * 100 : 0,
     adequacyGapPct: gapPct,
-    stateDepPct,
+    esserPct,
     eqTaxRate,
+    fbPctOfBudget: fbPctOfBudget || 0,
+    // Expose data for charts
+    fundBalance: fd?.fundBalance || null,
+    esserAlloc: esser,
   };
 }
 
@@ -158,7 +191,7 @@ export function scoreAllDistricts(districts, overrides = {}) {
   return Object.entries(districts)
     .filter(([, d]) => d.enr && d.enr.total > 0 && d.ufb)
     .map(([key, d]) => {
-      const stress = scoreDistrict(d, overrides);
+      const stress = scoreDistrict(d, overrides, key);
       stress.key = key;
       return { key, district: d, stress };
     })

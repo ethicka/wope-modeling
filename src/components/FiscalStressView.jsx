@@ -8,9 +8,9 @@ import DistrictSearch from './ui/DistrictSearch.jsx';
 
 const SORT_OPTIONS = [
   { key: "totalScore", label: "Stress Score" },
-  { key: "aidChangePct", label: "Aid Change" },
+  { key: "fbPctOfBudget", label: "Fund Balance" },
   { key: "adequacyGapPct", label: "Adequacy Gap" },
-  { key: "stateDepPct", label: "State Aid Dep" },
+  { key: "esserPct", label: "ESSER Exposure" },
   { key: "eqTaxRate", label: "Tax Rate" },
 ];
 
@@ -43,7 +43,8 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
       if (sortBy === "totalScore") return b.stress.totalScore - a.stress.totalScore;
       if (sortBy === "aidChangePct") return a.stress.aidChangePct - b.stress.aidChangePct; // most negative first
       if (sortBy === "adequacyGapPct") return b.stress.adequacyGapPct - a.stress.adequacyGapPct;
-      if (sortBy === "stateDepPct") return b.stress.stateDepPct - a.stress.stateDepPct;
+      if (sortBy === "fbPctOfBudget") return a.stress.fbPctOfBudget - b.stress.fbPctOfBudget; // lowest first = most stressed
+      if (sortBy === "esserPct") return b.stress.esserPct - a.stress.esserPct;
       if (sortBy === "eqTaxRate") return b.stress.eqTaxRate - a.stress.eqTaxRate;
       return 0;
     });
@@ -66,7 +67,7 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
     return compared.map(key => {
       const d = DISTRICTS[key];
       if (!d || !d.enr || !d.enr.total) return null;
-      const stress = scoreDistrict(d, overrides);
+      const stress = scoreDistrict(d, overrides, key);
       stress.key = key;
       return { key, district: d, stress };
     }).filter(Boolean);
@@ -75,12 +76,15 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
   // Detail districts (those with hand-coded fiscal stress history)
   const detailDistricts = comparedResults.filter(r => r.district.fiscalStress);
 
+  // Districts with real fund balance data from fiscal-stress-generated.js
+  const fbDistricts = comparedResults.filter(r => r.stress.fundBalance);
+
   // ── Universal chart data (works for ALL districts) ──
   // Indicator score comparison (grouped bar)
   const indicatorCompareData = useMemo(() => {
     if (comparedResults.length === 0) return null;
-    return ["aid-decline", "spend-above", "state-dependency", "tax-exhaustion"].map(id => {
-      const labels = { "aid-decline": "Aid Decline", "spend-above": "Over Adequacy", "state-dependency": "State Dep.", "tax-exhaustion": "Tax Capacity" };
+    return ["fund-balance", "spend-above", "esser-cliff", "tax-exhaustion"].map(id => {
+      const labels = { "fund-balance": "Fund Bal.", "spend-above": "Over Adequacy", "esser-cliff": "ESSER Cliff", "tax-exhaustion": "Tax Capacity" };
       const row = { indicator: labels[id] };
       comparedResults.forEach(r => {
         const ind = r.stress.indicators.find(i => i.id === id);
@@ -120,29 +124,39 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
     });
   }, [comparedResults]);
 
-  // Fund balance (only focal districts)
-  const fbTrendData = detailDistricts.length > 0
-    ? detailDistricts[0].district.fiscalStress.fundBalanceHistory.map((_, i) => {
-        const row = { year: detailDistricts[0].district.fiscalStress.fundBalanceHistory[i].year };
-        detailDistricts.forEach(r => {
-          row[r.district.short || r.key] = r.district.fiscalStress.fundBalanceHistory[i].pctBudget;
-        });
-        return row;
-      })
-    : null;
+  // Fund balance trend (universal — from generated fiscal data)
+  const fbTrendData = useMemo(() => {
+    if (fbDistricts.length === 0) return null;
+    // Get union of all years across compared districts
+    const allYears = new Set();
+    fbDistricts.forEach(r => {
+      Object.keys(r.stress.fundBalance).forEach(y => allYears.add(Number(y)));
+    });
+    const years = [...allYears].sort();
+    if (years.length < 2) return null;
+    return years.map(yr => {
+      const row = { year: `FY${String(yr).slice(2)}` };
+      fbDistricts.forEach(r => {
+        const bal = r.stress.fundBalance[yr] || 0;
+        const budget = r.district.ufb?.totalBudget || r.district.budget || 1;
+        row[r.district.short || r.key] = (bal / budget) * 100;
+      });
+      return row;
+    });
+  }, [fbDistricts]);
 
-  // ESSER (only focal districts)
-  const esserYears = ["FY21", "FY22", "FY23", "FY24", "FY25"];
-  const esserData = detailDistricts.length > 0
-    ? esserYears.map((yr, i) => {
-        const fyKey = `fy2${1 + i}`;
-        const row = { year: yr };
-        detailDistricts.forEach(r => {
-          row[r.district.short || r.key] = (r.district.fiscalStress.esser.spent[fyKey] || 0) / 1e6;
-        });
-        return row;
-      })
-    : null;
+  // ESSER allocation breakdown (universal — from generated fiscal data)
+  const esserData = useMemo(() => {
+    const esserDistricts = comparedResults.filter(r => r.stress.esserAlloc?.total > 0);
+    if (esserDistricts.length === 0) return null;
+    return esserDistricts.map(r => ({
+      name: r.district.short || r.district.name.split(" ")[0],
+      "ESSER I": (r.stress.esserAlloc.i || 0) / 1e6,
+      "ESSER II": (r.stress.esserAlloc.ii || 0) / 1e6,
+      "ARP ESSER III": (r.stress.esserAlloc.iii || 0) / 1e6,
+      color: r.district.color,
+    }));
+  }, [comparedResults]);
 
   return (
     <div>
@@ -152,7 +166,7 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
           <Tip term="FSI">Fiscal Stress</Tip> Dashboard — {allScored.length} Districts
         </div>
         <div style={{ fontSize: 12, color: "#9a7878", lineHeight: 1.6 }}>
-          Identifies districts showing structural fiscal warning signs — not to blame administrators, but to reveal where the funding system itself forces impossible choices. Every district is scored on declining state aid, spending above adequacy, state aid dependency, and tax capacity exhaustion.
+          Identifies districts showing structural fiscal warning signs — not to blame administrators, but to reveal where the funding system itself forces impossible choices. Every district is scored on declining fund balance, spending above adequacy, ESSER cliff exposure, and tax capacity exhaustion. Uses real NJ DOE data including audited fund balances (FY18–FY26) and actual ESSER I/II/III allocations.
         </div>
       </div>
 
@@ -346,22 +360,22 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
             </ResponsiveContainer>
           </div>
 
-          {/* ── Focal district bonus: Fund Balance Trend ── */}
+          {/* Fund Balance Trend (universal — from NJ DOE UFB data) */}
           {fbTrendData && (
             <div style={{ padding: 20, background: "#1a1914", borderRadius: 12, border: "1px solid #2a2820" }}>
               <div style={{ fontSize: 13, color: "#6a6758", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
                 Fund Balance as % of Budget
               </div>
-              <div style={{ fontSize: 11, color: "#5a5848", marginBottom: 12 }}>Historical reserves (detailed districts only)</div>
+              <div style={{ fontSize: 11, color: "#5a5848", marginBottom: 12 }}>Unrestricted surplus FY18–FY26 — declining reserves signal structural deficit</div>
               <ResponsiveContainer width="100%" height={200}>
                 <LineChart data={fbTrendData} margin={{ left: 0, right: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#2a2820" />
                   <XAxis dataKey="year" tick={{ fill: "#6a6758", fontSize: 11 }} axisLine={false} />
-                  <YAxis tick={{ fill: "#6a6758", fontSize: 11 }} axisLine={false} tickLine={false} domain={[0, 8]} unit="%" />
+                  <YAxis tick={{ fill: "#6a6758", fontSize: 11 }} axisLine={false} tickLine={false} unit="%" />
                   <Tooltip contentStyle={{ background: "#1a1914", border: "1px solid #2a2820", borderRadius: 8, color: "#e2e0d6", fontSize: 12 }}
                     formatter={v => `${v.toFixed(1)}%`} />
                   <ReferenceLine y={2} stroke="#ef4444" strokeDasharray="4 4" label={{ value: "2% min", fill: "#ef4444", fontSize: 10, position: "right" }} />
-                  {detailDistricts.map(r => (
+                  {fbDistricts.map(r => (
                     <Line key={r.key} type="monotone" dataKey={r.district.short || r.key} stroke={r.district.color}
                       strokeWidth={2} dot={{ r: 3, fill: r.district.color }} name={r.district.name} />
                   ))}
@@ -371,49 +385,26 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
             </div>
           )}
 
-          {/* ── Focal district bonus: ESSER Spend-Down ── */}
+          {/* ESSER Allocation Breakdown (universal — from NJ DOE data) */}
           {esserData && (
             <div style={{ padding: 20, background: "#1a1914", borderRadius: 12, border: "1px solid #2a2820" }}>
               <div style={{ fontSize: 13, color: "#6a6758", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
-                <Tip term="ESSER">ESSER</Tip> Spending by Year ($M)
+                <Tip term="ESSER">ESSER</Tip> Allocations ($M)
               </div>
-              <div style={{ fontSize: 11, color: "#5a5848", marginBottom: 12 }}>Federal relief funds that masked structural deficits — now expired</div>
+              <div style={{ fontSize: 11, color: "#5a5848", marginBottom: 12 }}>Total federal relief allocation — now expired, creating fiscal cliff</div>
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={esserData} margin={{ left: 0, right: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#2a2820" />
-                  <XAxis dataKey="year" tick={{ fill: "#6a6758", fontSize: 11 }} axisLine={false} />
+                  <XAxis dataKey="name" tick={{ fill: "#6a6758", fontSize: 10 }} axisLine={false} />
                   <YAxis tick={{ fill: "#6a6758", fontSize: 11 }} axisLine={false} tickLine={false} />
                   <Tooltip contentStyle={{ background: "#1a1914", border: "1px solid #2a2820", borderRadius: 8, color: "#e2e0d6", fontSize: 12 }}
-                    formatter={v => `$${v.toFixed(1)}M`} />
-                  {detailDistricts.map(r => (
-                    <Bar key={r.key} dataKey={r.district.short || r.key} fill={r.district.color} opacity={0.8} name={r.district.name} />
-                  ))}
+                    formatter={v => `$${v.toFixed(2)}M`} />
+                  <Bar dataKey="ESSER I" fill="#60a5fa" stackId="esser" opacity={0.8} />
+                  <Bar dataKey="ESSER II" fill="#818cf8" stackId="esser" opacity={0.8} />
+                  <Bar dataKey="ARP ESSER III" fill="#c084fc" stackId="esser" opacity={0.8} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                 </BarChart>
               </ResponsiveContainer>
-            </div>
-          )}
-
-          {/* ── Focal district bonus: ESSER Cliff Cards ── */}
-          {detailDistricts.length > 0 && (
-            <div style={{ gridColumn: "1 / -1", display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {detailDistricts.map(r => {
-                const es = r.district.fiscalStress.esser;
-                const cliffPct = (es.cliffExposure / (r.district.ufb?.totalBudget || r.district.budget)) * 100;
-                return (
-                  <div key={r.key} style={{ flex: 1, minWidth: 200, padding: 12, background: "#12110e", borderRadius: 8, border: `1px solid ${r.district.color}25` }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: r.district.color }}>{r.district.short || r.district.name}</span>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: cliffPct > 3 ? "#ef4444" : cliffPct > 1 ? "#f59e0b" : "#22c55e" }}>{fmt(es.cliffExposure)}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8a8778" }}>
-                      <span>{es.positionsFundedByEsser} positions at risk</span>
-                      <span>{cliffPct.toFixed(1)}% of budget</span>
-                    </div>
-                    <div style={{ fontSize: 10, color: "#5a5848", marginTop: 4, lineHeight: 1.4 }}>{es.usedFor.join(" · ")}</div>
-                  </div>
-                );
-              })}
             </div>
           )}
         </div>
@@ -467,9 +458,9 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
                 <th style={{ textAlign: "left", padding: "6px 8px", color: "#6a6758", fontWeight: 500 }}>County</th>
                 <th style={{ textAlign: "center", padding: "6px 8px", color: "#6a6758", fontWeight: 500 }}>Score</th>
                 <th style={{ textAlign: "center", padding: "6px 8px", color: "#6a6758", fontWeight: 500 }}>Level</th>
-                <th style={{ textAlign: "right", padding: "6px 8px", color: "#6a6758", fontWeight: 500 }}>Aid Chg</th>
+                <th style={{ textAlign: "right", padding: "6px 8px", color: "#6a6758", fontWeight: 500 }}>Fund Bal</th>
                 <th style={{ textAlign: "right", padding: "6px 8px", color: "#6a6758", fontWeight: 500 }}>Adeq. Gap</th>
-                <th style={{ textAlign: "right", padding: "6px 8px", color: "#6a6758", fontWeight: 500 }}>State Dep</th>
+                <th style={{ textAlign: "right", padding: "6px 8px", color: "#6a6758", fontWeight: 500 }}>ESSER</th>
                 <th style={{ textAlign: "right", padding: "6px 8px", color: "#6a6758", fontWeight: 500 }}>Tax Rate</th>
               </tr>
             </thead>
@@ -506,14 +497,14 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
                         background: `${LEVEL_COLORS[s.level]}18`, color: LEVEL_COLORS[s.level],
                       }}>{s.level}</span>
                     </td>
-                    <td style={{ textAlign: "right", padding: "6px 8px", color: s.aidChangePct < 0 ? "#ef4444" : "#22c55e", fontSize: 11 }}>
-                      {s.aidChangePct >= 0 ? "+" : ""}{s.aidChangePct.toFixed(1)}%
+                    <td style={{ textAlign: "right", padding: "6px 8px", color: s.fbPctOfBudget < 2 ? "#ef4444" : s.fbPctOfBudget < 4 ? "#f59e0b" : "#22c55e", fontSize: 11 }}>
+                      {s.fbPctOfBudget.toFixed(1)}%
                     </td>
                     <td style={{ textAlign: "right", padding: "6px 8px", color: s.adequacyGapPct > 0 ? "#f59e0b" : "#22c55e", fontSize: 11 }}>
                       {s.adequacyGapPct > 0 ? "+" : ""}{s.adequacyGapPct.toFixed(1)}%
                     </td>
-                    <td style={{ textAlign: "right", padding: "6px 8px", color: s.stateDepPct > 70 ? "#ef4444" : s.stateDepPct > 40 ? "#f59e0b" : "#22c55e", fontSize: 11 }}>
-                      {s.stateDepPct.toFixed(0)}%
+                    <td style={{ textAlign: "right", padding: "6px 8px", color: s.esserPct > 5 ? "#ef4444" : s.esserPct > 2 ? "#f59e0b" : "#8a8778", fontSize: 11 }}>
+                      {s.esserPct > 0 ? `${s.esserPct.toFixed(1)}%` : '—'}
                     </td>
                     <td style={{ textAlign: "right", padding: "6px 8px", color: s.eqTaxRate > 1.5 ? "#ef4444" : s.eqTaxRate > 1.0 ? "#f59e0b" : "#8a8778", fontSize: 11 }}>
                       {s.eqTaxRate.toFixed(2)}%
@@ -574,7 +565,7 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
                   { label: "Composite Stress Score", fn: r => <span style={{ color: LEVEL_COLORS[r.stress.level], fontWeight: 700 }}>{r.stress.totalScore} / 100</span> },
                   { label: "Stress Level", fn: r => <span style={{ color: LEVEL_COLORS[r.stress.level], fontWeight: 600, textTransform: "capitalize" }}>{r.stress.level}</span> },
                   { label: "sep" },
-                  ...["aid-decline", "spend-above", "state-dependency", "tax-exhaustion"].map(id => ({
+                  ...["fund-balance", "spend-above", "esser-cliff", "tax-exhaustion"].map(id => ({
                     label: null, id,
                     fn: r => {
                       const ind = r.stress.indicators.find(i => i.id === id);
@@ -587,7 +578,7 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
                       );
                     },
                     getLabel: () => {
-                      const labels = { "aid-decline": "Declining State Aid", "spend-above": "Spending Above Adequacy", "state-dependency": "State Aid Dependency", "tax-exhaustion": "Tax Capacity Exhaustion" };
+                      const labels = { "fund-balance": "Declining Fund Balance", "spend-above": "Spending Above Adequacy", "esser-cliff": "ESSER Cliff Exposure", "tax-exhaustion": "Tax Capacity Exhaustion" };
                       return labels[id];
                     },
                   })),
@@ -599,10 +590,9 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
                   }},
                   { label: "Budget", fn: r => fmt(r.district.ufb?.totalBudget || r.district.budget) },
                   { label: "SFRA Adequacy", fn: r => fmt(r.stress.formula.adequacy) },
-                  { label: "State Aid % of Budget", fn: r => {
-                    const pct = (r.district.fy26 / (r.district.ufb?.totalBudget || r.district.budget)) * 100;
-                    return `${pct.toFixed(1)}%`;
-                  }},
+                  { label: "Total ESSER", fn: r => r.stress.esserAlloc?.total > 0 ? fmt(r.stress.esserAlloc.total) : '—' },
+                  { label: "ESSER % of Budget (annual)", fn: r => r.stress.esserPct > 0 ? `${r.stress.esserPct.toFixed(1)}%` : '—' },
+                  { label: "Fund Balance % of Budget", fn: r => `${r.stress.fbPctOfBudget.toFixed(1)}%` },
                   { label: "Eq. Tax Rate", fn: r => `${r.stress.eqTaxRate.toFixed(3)}%` },
                   { label: "Enrollment", fn: r => r.district.enr.total.toLocaleString() },
                   { label: "At-Risk %", fn: r => `${(r.district.atRiskPct * 100).toFixed(1)}%` },
