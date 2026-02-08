@@ -31,5 +31,5 @@ export const SCENARIOS = {
 
 export const GROWTH_DEFAULTS = { ev: 4.0, income: 3.0, enrollment: -0.2, cpi: 3.5, levy: 2.0, budgetGrowth: 4.5 };
 
-export const VIEWS = ["profiles", "formula", "results", "budget", "projection", "fiscal", "custom"];
-export const VIEW_LABELS = { profiles: "District Profiles", formula: "SFRA Editor", results: "Results Dashboard", budget: "Budget Analysis", projection: "5-Year Projection", fiscal: "State Fiscal Impact", custom: "Custom Formula" };
+export const VIEWS = ["profiles", "formula", "results", "budget", "projection", "fiscal", "stress", "custom"];
+export const VIEW_LABELS = { profiles: "District Profiles", formula: "SFRA Editor", results: "Results Dashboard", budget: "Budget Analysis", projection: "5-Year Projection", fiscal: "State Fiscal Impact", stress: "Fiscal Stress", custom: "Custom Formula" };
