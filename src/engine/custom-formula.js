@@ -1,5 +1,6 @@
 import { FORMULA } from '../data/formula-params.js';
-import { CUSTOM_DEFAULTS } from '../data/custom-formula-data.js';
+import { CUSTOM_DEFAULTS, CUSTOM_DATA } from '../data/custom-formula-data.js';
+import { DISTRICTS } from '../data/districts.js';
 import { runFormula } from './sfra-formula.js';
 
 // Cap TBI to prevent bad income estimates from dominating
@@ -21,9 +22,11 @@ export function runCustomFormula(d, cd, params = {}) {
   const tbi = Math.min(TBI_MAX, Math.max(TBI_MIN, tbiRaw));
   const povertyFactor = Math.pow(povertyRate, p.povertyExponent);
 
-  // Core need: Base × (1 + PovertyFactor × IDF × TBI) × Enrollment
+  // Core need: Base × (1 + PovertyFactor × IDF × TBI) × Enrollment × GCA
+  // GCA adjusts for regional cost-of-living (county-level)
+  const gca = d.gca || 1.0;
   const needMultiplier = povertyFactor * idf * tbi;
-  const coreNeed = base * (1.0 + needMultiplier) * enrollment;
+  const coreNeed = base * (1.0 + needMultiplier) * enrollment * gca;
 
   // Subtract Local Fair Share
   const avgEV = (d.ev3yr[0] + d.ev3yr[1] + d.ev3yr[2]) / 3;
@@ -46,7 +49,7 @@ export function runCustomFormula(d, cd, params = {}) {
   const sfraCapped = runFormula(d);
 
   return {
-    coreNeed, coreAid, lfs, needMultiplier,
+    coreNeed, coreAid, lfs, needMultiplier, gca,
     spedAid, secAid, transAid,
     totalCustom, perPupil,
     povertyRate, idf, tbi, tbiRaw, povertyFactor,
@@ -59,5 +62,68 @@ export function runCustomFormula(d, cd, params = {}) {
     changeFy26Pct: sfraCapped.totalFormula > 0 ? ((totalCustom - sfraCapped.totalFormula) / sfraCapped.totalFormula) * 100 : 0,
     changeFy25: totalCustom - d.fy25,
     changeFy25Pct: d.fy25 > 0 ? ((totalCustom - d.fy25) / d.fy25) * 100 : 0,
+  };
+}
+
+/** Binary search for a base PP where total statewide custom = total FY26 actual */
+export function calibrateRevenueNeutralBase(params = {}) {
+  const totalFy26 = Object.values(DISTRICTS).reduce((s, d) =>
+    s + d.fy26Detail.eq + d.fy26Detail.sped + d.fy26Detail.sec + d.fy26Detail.trans, 0);
+
+  let lo = 2000, hi = 30000;
+  for (let i = 0; i < 50; i++) {
+    const mid = (lo + hi) / 2;
+    const p = { ...CUSTOM_DEFAULTS, ...params, customBase: mid };
+    let total = 0;
+    for (const [key, d] of Object.entries(DISTRICTS)) {
+      const cd = CUSTOM_DATA[key];
+      if (!cd || !d.enr.total) continue;
+      const r = runCustomFormula(d, cd, p);
+      total += r.totalCustom;
+    }
+    if (total > totalFy26) hi = mid;
+    else lo = mid;
+  }
+  return { base: Math.round((lo + hi) / 2), targetTotal: totalFy26 };
+}
+
+/** Run all 558 districts and return redistribution analysis */
+export function calcStatewideRedistribution(params = {}) {
+  const results = [];
+  let totalCustom = 0, totalFy26 = 0, totalSfraUncapped = 0;
+
+  for (const [key, d] of Object.entries(DISTRICTS)) {
+    const cd = CUSTOM_DATA[key];
+    if (!cd || !d.enr.total) continue;
+    const r = runCustomFormula(d, cd, params);
+    const fy26Actual = d.fy26Detail.eq + d.fy26Detail.sped + d.fy26Detail.sec + d.fy26Detail.trans;
+    const change = r.totalCustom - fy26Actual;
+    results.push({
+      key, name: d.name, short: d.short, county: d.county,
+      enrollment: d.enr.total, atRiskPct: d.atRiskPct, gca: d.gca,
+      custom: r.totalCustom, fy26Actual, sfraUncapped: r.sfraUncapped,
+      change, changePct: fy26Actual > 0 ? (change / fy26Actual) * 100 : 0,
+      perPupilCustom: r.perPupil,
+      perPupilFy26: fy26Actual / d.enr.total,
+      perPupilChange: r.perPupil - fy26Actual / d.enr.total,
+    });
+    totalCustom += r.totalCustom;
+    totalFy26 += fy26Actual;
+    totalSfraUncapped += r.sfraUncapped;
+  }
+
+  results.sort((a, b) => b.change - a.change);
+  const gainers = results.filter(r => r.change > 0);
+  const losers = results.filter(r => r.change < 0).reverse();
+
+  return {
+    results, gainers, losers,
+    totalCustom, totalFy26, totalSfraUncapped,
+    netChange: totalCustom - totalFy26,
+    districtCount: results.length,
+    gainerCount: gainers.length,
+    loserCount: losers.length,
+    totalGains: gainers.reduce((s, r) => s + r.change, 0),
+    totalLosses: losers.reduce((s, r) => s + r.change, 0),
   };
 }
