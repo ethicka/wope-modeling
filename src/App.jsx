@@ -63,7 +63,7 @@ export default function SFRAModel() {
         {view === "results" && <ResultsView compared={compared} addCompared={addCompared} removeCompared={removeCompared} overrides={overrides} />}
         {view === "projection" && <ProjectionView compared={compared} addCompared={addCompared} removeCompared={removeCompared} overrides={overrides} />}
         {view === "fiscal" && <FiscalView overrides={overrides} />}
-        {view === "stress" && <FiscalStressView overrides={overrides} />}
+        {view === "stress" && <FiscalStressView compared={compared} addCompared={addCompared} removeCompared={removeCompared} overrides={overrides} />}
       </div>
     </div>
   );
