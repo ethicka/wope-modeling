@@ -4,12 +4,13 @@ import { runFormula } from './sfra-formula.js';
  * Fiscal Stress scoring engine — works for ANY NJ district.
  *
  * Computes a 0–100 composite score from 4 indicators (0–25 each):
- *   1. Declining State Aid    — FY25→FY26 aid trajectory
+ *   1. Declining State Aid     — FY25→FY26 aid trajectory
  *   2. Spending Above Adequacy — budget exceeds SFRA formula adequacy
- *   3. Structural Revenue Gap  — total revenue < total budget (fund balance proxy)
- *   4. Federal Aid Dependency  — federal revenue as % of budget (ESSER proxy)
+ *   3. State Aid Dependency    — state aid as % of budget (vulnerability to state decisions)
+ *   4. Tax Capacity Exhaustion — equalized tax rate vs capacity (how hard the district is already taxing)
  *
- * Districts with detailed `fiscalStress` data get enriched descriptions.
+ * Districts with detailed `fiscalStress` data get enriched descriptions
+ * including fund balance history, ESSER detail, and revenue/cost growth rates.
  */
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -18,7 +19,7 @@ export function scoreDistrict(d, overrides = {}) {
   const formula = runFormula(d, overrides);
   const u = d.ufb || {};
   const budget = u.totalBudget || d.budget || 1;
-  const fs = d.fiscalStress; // may be undefined for most districts
+  const fs = d.fiscalStress; // detailed data for focal districts only
 
   const indicators = [];
 
@@ -49,67 +50,78 @@ export function scoreDistrict(d, overrides = {}) {
     score: Math.round(spendScore),
     max: 25,
     severity: spendScore > 15 ? "critical" : spendScore > 8 ? "warning" : "stable",
-    detail: adequacyGap > 0
-      ? `Budget exceeds SFRA adequacy by ${gapPct.toFixed(1)}%`
-      : `Budget is ${Math.abs(gapPct).toFixed(1)}% below SFRA adequacy`,
+    detail: fs
+      ? `Budget exceeds adequacy by ${gapPct.toFixed(1)}%. Costs growing ${fs.costGrowthRate.toFixed(1)}%/yr vs revenue ${fs.revenueGrowthRate.toFixed(1)}%/yr.`
+      : adequacyGap > 0
+        ? `Budget exceeds SFRA adequacy by ${gapPct.toFixed(1)}%`
+        : `Budget is ${Math.abs(gapPct).toFixed(1)}% below SFRA adequacy`,
     metric: `${adequacyGap > 0 ? "+" : ""}${gapPct.toFixed(1)}%`,
     raw: gapPct,
   });
 
-  // ── 3. Structural Revenue Gap ───────────────────────────────
-  // Total identifiable revenue vs budget — gap = implicit fund balance usage
-  const totalRevenue = (u.localTaxLevy || 0) + (u.stateAid || 0) + (u.federalAid || 0) + (u.otherRevenue || 0);
-  const revGap = budget - totalRevenue;
-  const revGapPct = budget > 0 ? (revGap / budget) * 100 : 0;
-  // If detailed data available, use actual revenue-cost growth gap instead
-  let growthGapDetail, growthGapMetric;
-  if (fs && fs.revenueGrowthRate != null) {
-    const gap = fs.costGrowthRate - fs.revenueGrowthRate;
-    growthGapDetail = `Costs growing ${fs.costGrowthRate.toFixed(1)}%/yr vs revenue ${fs.revenueGrowthRate.toFixed(1)}%/yr (gap: ${gap.toFixed(1)}pp)`;
-    growthGapMetric = `${gap.toFixed(1)}pp`;
-  } else {
-    growthGapDetail = revGap > 0
-      ? `Revenue shortfall of ${revGapPct.toFixed(1)}% of budget — implies fund balance drawdown`
-      : `Revenue covers budget with ${Math.abs(revGapPct).toFixed(1)}% surplus`;
-    growthGapMetric = `${revGapPct.toFixed(1)}%`;
-  }
-  const gapScore = clamp((revGapPct / 8) * 25, 0, 25);
-  indicators.push({
-    id: "growth-gap",
-    label: "Revenue–Cost Gap",
-    score: Math.round(gapScore),
-    max: 25,
-    severity: gapScore > 15 ? "critical" : gapScore > 8 ? "warning" : "stable",
-    detail: growthGapDetail,
-    metric: growthGapMetric,
-    raw: revGapPct,
-  });
-
-  // ── 4. Federal Aid Dependency (ESSER proxy) ─────────────────
-  const fedAid = u.federalAid || 0;
-  const fedPct = budget > 0 ? (fedAid / budget) * 100 : 0;
-  // Districts with >5% federal aid share had significant ESSER exposure
-  let esserDetail, esserMetric;
+  // ── 3. State Aid Dependency ─────────────────────────────────
+  // Districts with >70% of budget from state aid are extremely vulnerable
+  // to state funding decisions — a single legislative change can devastate them.
+  const stateAid = u.stateAid || d.fy26 || 0;
+  const stateDepPct = budget > 0 ? (stateAid / budget) * 100 : 0;
+  // Scale: 40% = starts scoring, 90% = max score
+  const depScore = clamp(((stateDepPct - 40) / 50) * 25, 0, 25);
+  let depDetail;
   if (fs && fs.esser) {
     const cliffPct = (fs.esser.cliffExposure / budget) * 100;
-    esserDetail = `${fs.esser.positionsFundedByEsser} ESSER-funded positions; ${cliffPct.toFixed(1)}% of budget in recurring cliff exposure`;
-    esserMetric = `${cliffPct.toFixed(1)}%`;
+    depDetail = `State aid is ${stateDepPct.toFixed(0)}% of budget. Additionally, ${fs.esser.positionsFundedByEsser} ESSER-funded positions at risk (${cliffPct.toFixed(1)}% cliff exposure).`;
   } else {
-    esserDetail = fedPct > 0.5
-      ? `Federal aid is ${fedPct.toFixed(1)}% of budget — higher shares indicate ESSER dependency risk`
-      : `Minimal federal aid exposure (${fedPct.toFixed(2)}% of budget)`;
-    esserMetric = `${fedPct.toFixed(1)}%`;
+    depDetail = stateDepPct > 70
+      ? `State aid is ${stateDepPct.toFixed(0)}% of budget — a single state funding decision could force massive cuts`
+      : stateDepPct > 40
+        ? `State aid is ${stateDepPct.toFixed(0)}% of budget — moderate vulnerability to state funding shifts`
+        : `State aid is only ${stateDepPct.toFixed(0)}% of budget — primarily locally funded`;
   }
-  const esserScore = clamp((fedPct / 6) * 25, 0, 25);
   indicators.push({
-    id: "esser-cliff",
-    label: "Federal/ESSER Dependency",
-    score: Math.round(esserScore),
+    id: "state-dependency",
+    label: "State Aid Dependency",
+    score: Math.round(depScore),
     max: 25,
-    severity: esserScore > 15 ? "critical" : esserScore > 8 ? "warning" : "stable",
-    detail: esserDetail,
-    metric: esserMetric,
-    raw: fedPct,
+    severity: depScore > 15 ? "critical" : depScore > 8 ? "warning" : "stable",
+    detail: depDetail,
+    metric: `${stateDepPct.toFixed(0)}%`,
+    raw: stateDepPct,
+  });
+
+  // ── 4. Tax Capacity Exhaustion ──────────────────────────────
+  // Equalized school tax rate: levy / EV. Higher = less room to raise local revenue.
+  // NJ average is ~1.0–1.2%. Districts above 1.5% are tapped out.
+  // Districts with very LOW rates but high state dependency (like Newark at 0.56%)
+  // score low here — their stress shows up in indicator 3 instead.
+  const avgEV = (d.ev3yr[0] + d.ev3yr[1] + d.ev3yr[2]) / 3;
+  const levy = u.localTaxLevy || d.levy || 0;
+  const eqTaxRate = avgEV > 0 ? (levy / avgEV) * 100 : 0;
+  // Also compare actual levy to formula's LFS — if levy >> LFS, overtaxing
+  const levyVsLfs = formula.lfs > 0 ? (levy / formula.lfs) * 100 : 100;
+  // Composite: high tax rate + overtaxing vs LFS
+  const taxScore = clamp(
+    ((eqTaxRate - 1.0) / 1.5) * 15 + // tax rate component (1.0% threshold, 2.5% = max)
+    ((Math.max(0, levyVsLfs - 100)) / 80) * 10, // overtaxing component (>100% of LFS)
+    0, 25
+  );
+  let taxDetail;
+  if (fs) {
+    const fbEnd = fs.fundBalanceHistory[fs.fundBalanceHistory.length - 1];
+    taxDetail = `Eq. tax rate ${eqTaxRate.toFixed(3)}%, levy is ${levyVsLfs.toFixed(0)}% of formula LFS. Fund balance at ${fbEnd.pctBudget.toFixed(1)}% of budget.`;
+  } else {
+    taxDetail = eqTaxRate > 1.5
+      ? `Eq. tax rate ${eqTaxRate.toFixed(3)}% (high) — levy is ${levyVsLfs.toFixed(0)}% of formula LFS, limited room for local increases`
+      : `Eq. tax rate ${eqTaxRate.toFixed(3)}% — levy is ${levyVsLfs.toFixed(0)}% of formula LFS`;
+  }
+  indicators.push({
+    id: "tax-exhaustion",
+    label: "Tax Capacity Exhaustion",
+    score: Math.round(taxScore),
+    max: 25,
+    severity: taxScore > 15 ? "critical" : taxScore > 8 ? "warning" : "stable",
+    detail: taxDetail,
+    metric: `${eqTaxRate.toFixed(2)}%`,
+    raw: eqTaxRate,
   });
 
   const totalScore = indicators.reduce((s, ind) => s + ind.score, 0);
@@ -125,8 +137,8 @@ export function scoreDistrict(d, overrides = {}) {
     // Quick-access metrics for table sorting
     aidChangePct: aidChange,
     adequacyGapPct: gapPct,
-    revGapPct,
-    fedPct,
+    stateDepPct,
+    eqTaxRate,
   };
 }
 

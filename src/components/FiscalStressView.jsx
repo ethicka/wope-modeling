@@ -10,8 +10,8 @@ const SORT_OPTIONS = [
   { key: "totalScore", label: "Stress Score" },
   { key: "aidChangePct", label: "Aid Change" },
   { key: "adequacyGapPct", label: "Adequacy Gap" },
-  { key: "revGapPct", label: "Revenue Gap" },
-  { key: "fedPct", label: "Federal Aid %" },
+  { key: "stateDepPct", label: "State Aid Dep" },
+  { key: "eqTaxRate", label: "Tax Rate" },
 ];
 
 const LEVEL_FILTERS = ["all", "severe", "elevated", "moderate", "low"];
@@ -43,8 +43,8 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
       if (sortBy === "totalScore") return b.stress.totalScore - a.stress.totalScore;
       if (sortBy === "aidChangePct") return a.stress.aidChangePct - b.stress.aidChangePct; // most negative first
       if (sortBy === "adequacyGapPct") return b.stress.adequacyGapPct - a.stress.adequacyGapPct;
-      if (sortBy === "revGapPct") return b.stress.revGapPct - a.stress.revGapPct;
-      if (sortBy === "fedPct") return b.stress.fedPct - a.stress.fedPct;
+      if (sortBy === "stateDepPct") return b.stress.stateDepPct - a.stress.stateDepPct;
+      if (sortBy === "eqTaxRate") return b.stress.eqTaxRate - a.stress.eqTaxRate;
       return 0;
     });
     return list;
@@ -105,7 +105,7 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
           <Tip term="FSI">Fiscal Stress</Tip> Dashboard — {allScored.length} Districts
         </div>
         <div style={{ fontSize: 12, color: "#9a7878", lineHeight: 1.6 }}>
-          Identifies districts showing structural fiscal warning signs — not to blame administrators, but to reveal where the funding system itself forces impossible choices. Every district is scored on declining state aid, spending above adequacy, structural revenue gaps, and federal aid dependency.
+          Identifies districts showing structural fiscal warning signs — not to blame administrators, but to reveal where the funding system itself forces impossible choices. Every district is scored on declining state aid, spending above adequacy, state aid dependency, and tax capacity exhaustion.
         </div>
       </div>
 
@@ -323,8 +323,8 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
                 <th style={{ textAlign: "center", padding: "6px 8px", color: "#6a6758", fontWeight: 500 }}>Level</th>
                 <th style={{ textAlign: "right", padding: "6px 8px", color: "#6a6758", fontWeight: 500 }}>Aid Chg</th>
                 <th style={{ textAlign: "right", padding: "6px 8px", color: "#6a6758", fontWeight: 500 }}>Adeq. Gap</th>
-                <th style={{ textAlign: "right", padding: "6px 8px", color: "#6a6758", fontWeight: 500 }}>Rev Gap</th>
-                <th style={{ textAlign: "right", padding: "6px 8px", color: "#6a6758", fontWeight: 500 }}>Fed %</th>
+                <th style={{ textAlign: "right", padding: "6px 8px", color: "#6a6758", fontWeight: 500 }}>State Dep</th>
+                <th style={{ textAlign: "right", padding: "6px 8px", color: "#6a6758", fontWeight: 500 }}>Tax Rate</th>
               </tr>
             </thead>
             <tbody>
@@ -366,11 +366,11 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
                     <td style={{ textAlign: "right", padding: "6px 8px", color: s.adequacyGapPct > 0 ? "#f59e0b" : "#22c55e", fontSize: 11 }}>
                       {s.adequacyGapPct > 0 ? "+" : ""}{s.adequacyGapPct.toFixed(1)}%
                     </td>
-                    <td style={{ textAlign: "right", padding: "6px 8px", color: s.revGapPct > 2 ? "#ef4444" : s.revGapPct > 0.5 ? "#f59e0b" : "#22c55e", fontSize: 11 }}>
-                      {s.revGapPct.toFixed(1)}%
+                    <td style={{ textAlign: "right", padding: "6px 8px", color: s.stateDepPct > 70 ? "#ef4444" : s.stateDepPct > 40 ? "#f59e0b" : "#22c55e", fontSize: 11 }}>
+                      {s.stateDepPct.toFixed(0)}%
                     </td>
-                    <td style={{ textAlign: "right", padding: "6px 8px", color: s.fedPct > 3 ? "#f59e0b" : "#8a8778", fontSize: 11 }}>
-                      {s.fedPct.toFixed(1)}%
+                    <td style={{ textAlign: "right", padding: "6px 8px", color: s.eqTaxRate > 1.5 ? "#ef4444" : s.eqTaxRate > 1.0 ? "#f59e0b" : "#8a8778", fontSize: 11 }}>
+                      {s.eqTaxRate.toFixed(2)}%
                     </td>
                   </tr>
                 );
@@ -428,7 +428,7 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
                   { label: "Composite Stress Score", fn: r => <span style={{ color: LEVEL_COLORS[r.stress.level], fontWeight: 700 }}>{r.stress.totalScore} / 100</span> },
                   { label: "Stress Level", fn: r => <span style={{ color: LEVEL_COLORS[r.stress.level], fontWeight: 600, textTransform: "capitalize" }}>{r.stress.level}</span> },
                   { label: "sep" },
-                  ...["aid-decline", "spend-above", "growth-gap", "esser-cliff"].map(id => ({
+                  ...["aid-decline", "spend-above", "state-dependency", "tax-exhaustion"].map(id => ({
                     label: null, id,
                     fn: r => {
                       const ind = r.stress.indicators.find(i => i.id === id);
@@ -441,7 +441,7 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
                       );
                     },
                     getLabel: () => {
-                      const labels = { "aid-decline": "Declining State Aid", "spend-above": "Spending Above Adequacy", "growth-gap": "Revenue–Cost Gap", "esser-cliff": "Federal/ESSER Dependency" };
+                      const labels = { "aid-decline": "Declining State Aid", "spend-above": "Spending Above Adequacy", "state-dependency": "State Aid Dependency", "tax-exhaustion": "Tax Capacity Exhaustion" };
                       return labels[id];
                     },
                   })),
@@ -457,7 +457,7 @@ export default function FiscalStressView({ compared, addCompared, removeCompared
                     const pct = (r.district.fy26 / (r.district.ufb?.totalBudget || r.district.budget)) * 100;
                     return `${pct.toFixed(1)}%`;
                   }},
-                  { label: "Federal Aid % of Budget", fn: r => `${r.stress.fedPct.toFixed(1)}%` },
+                  { label: "Eq. Tax Rate", fn: r => `${r.stress.eqTaxRate.toFixed(3)}%` },
                   { label: "Enrollment", fn: r => r.district.enr.total.toLocaleString() },
                   { label: "At-Risk %", fn: r => `${(r.district.atRiskPct * 100).toFixed(1)}%` },
                 ].map((row, i) => {
