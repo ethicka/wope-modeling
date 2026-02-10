@@ -7,6 +7,7 @@ import ResultsView from './components/ResultsView.jsx';
 import BudgetView from './components/BudgetView.jsx';
 import ProjectionView from './components/ProjectionView.jsx';
 import FiscalView from './components/FiscalView.jsx';
+import FiscalStressView from './components/FiscalStressView.jsx';
 import CustomFormulaView from './components/CustomFormulaView.jsx';
 
 export default function SFRAModel() {
@@ -43,7 +44,7 @@ export default function SFRAModel() {
           {VIEWS.map(v => (
             <button key={v} onClick={() => setView(v)} style={{
               padding: "8px 16px", borderRadius: 6, border: "none",
-              background: view === v ? (v === "custom" ? "#9333ea" : v === "budget" ? "#a89aca" : "#c4b98a") : "#1a1914",
+              background: view === v ? (v === "custom" ? "#9333ea" : v === "stress" ? "#e88a8a" : v === "budget" ? "#a89aca" : "#c4b98a") : "#1a1914",
               color: view === v ? "#12110e" : "#8a8778",
               fontSize: 13, fontWeight: view === v ? 700 : 500,
               cursor: "pointer", transition: "all 0.15s",
@@ -62,6 +63,7 @@ export default function SFRAModel() {
         {view === "results" && <ResultsView compared={compared} addCompared={addCompared} removeCompared={removeCompared} overrides={overrides} />}
         {view === "projection" && <ProjectionView compared={compared} addCompared={addCompared} removeCompared={removeCompared} overrides={overrides} />}
         {view === "fiscal" && <FiscalView overrides={overrides} />}
+        {view === "stress" && <FiscalStressView compared={compared} addCompared={addCompared} removeCompared={removeCompared} overrides={overrides} />}
       </div>
     </div>
   );

@@ -13,6 +13,8 @@ const TIPS = {
   TEV: "True Equalized Valuation — aggregate property value published annually by NJ Division of Taxation",
   PP: "Per Pupil — the dollar amount divided by total enrollment",
   EqAid: "Equalization Aid — the main state aid category, equal to adequacy budget minus local fair share (floored at $0)",
+  ESSER: "Elementary and Secondary School Emergency Relief — federal COVID-era funding (ARP/ESSER III) that expired September 2024, creating a fiscal cliff for districts that used it for recurring costs",
+  FSI: "Fiscal Stress Index — a composite score (0–100) measuring how many structural warning signs a district exhibits simultaneously",
 };
 
 export default function Tip({ term, children }) {
